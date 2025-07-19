@@ -54,7 +54,7 @@ export class TwitchChatBot {
     // Create chat client
     this.chatClient = new ChatClient({
       authProvider: this.authProvider,
-      channels: [], // Will be set when connecting to channels
+      channels: [process.env.TWITCH_CHANNEL_NAME!], // Will be set when connecting to channels
     });
 
     // Set up event handlers

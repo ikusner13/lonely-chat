@@ -1,9 +1,8 @@
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
-import { RefreshingAuthProvider, AppTokenAuthProvider, AccessToken } from "@twurple/auth";
-import { ApiClient } from "@twurple/api";
-import { ChatClient } from "@twurple/chat";
-import { EventSubWsListener } from "@twurple/eventsub-ws";
+import { TwitchChatBot } from "./services/chatbot.service";
+import { EventSubService } from "./services/eventsub.service";
+import { StreamService } from "./services/stream.service";
 
 interface TokenData {
   accessToken: string;
@@ -21,8 +20,9 @@ interface TokenStorage {
 }
 
 export class BotOrchestrator {
-  private bots: Map<string, ChatClient> = new Map();
-  private eventSubListener?: EventSubWsListener;
+  private bot?: TwitchChatBot;
+  private eventSubService?: EventSubService;
+  private streamService?: StreamService;
   private channelUserId: string;
   private channelName: string;
   private isStreamOnline = false;
@@ -31,165 +31,235 @@ export class BotOrchestrator {
     // Get channel info from environment variables
     this.channelUserId = process.env.TWITCH_CHANNEL_ID!;
     this.channelName = process.env.TWITCH_CHANNEL_NAME!;
-    
+
     if (!this.channelUserId || !this.channelName) {
-      throw new Error("TWITCH_CHANNEL_ID and TWITCH_CHANNEL_NAME must be set in .env");
+      throw new Error(
+        "TWITCH_CHANNEL_ID and TWITCH_CHANNEL_NAME must be set in .env"
+      );
     }
-    
-    console.log(`🤖 BotOrchestrator initialized for channel: ${this.channelName}`);
+
+    console.log(
+      `🤖 BotOrchestrator initialized for channel: ${this.channelName}`
+    );
   }
 
   async start() {
     console.log("🚀 Starting BotOrchestrator...");
-    
+
     // Load tokens
     const tokens = await this.loadTokens();
-    
+
     if (!tokens.channel) {
-      console.error("❌ No channel tokens found. Run: bun run generate-channel-token");
+      console.error(
+        "❌ No channel tokens found. Run: bun run generate-channel-token"
+      );
       return;
     }
-    
+
+    // Initialize stream service
+    this.streamService = new StreamService(
+      process.env.TWITCH_CLIENT_ID!,
+      process.env.TWITCH_CLIENT_SECRET!,
+      this.channelUserId,
+      this.channelName
+    );
+    await this.streamService.initialize(tokens.channel);
+
     // Initialize EventSub with user token for channel monitoring
     await this.initializeEventSub(tokens.channel);
-    
+
     // Initialize all bot clients (but don't connect yet)
     await this.initializeBots(tokens.bots);
-    
+
+    // Check if stream is currently online
+    await this.checkStreamStatus();
+
     console.log("✅ BotOrchestrator started successfully");
   }
 
   private async loadTokens(): Promise<TokenStorage> {
     const TOKEN_FILE = "./tokens.json";
-    
+
     if (!existsSync(TOKEN_FILE)) {
       throw new Error("tokens.json not found");
     }
-    
+
     const data = await readFile(TOKEN_FILE, "utf-8");
     return JSON.parse(data);
   }
 
   private async initializeEventSub(channelToken: TokenData) {
-    console.log("📡 Initializing EventSub listener with user token...");
+    console.log("📡 Initializing EventSub service...");
+
+    // Create EventSub service
+    this.eventSubService = new EventSubService(
+      process.env.TWITCH_CLIENT_ID!,
+      process.env.TWITCH_CLIENT_SECRET!,
+      this.channelUserId,
+      "./tokens.json"
+    );
+
+    // Initialize with callbacks
+    await this.eventSubService.initialize(channelToken, {
+      onStreamOnline: async (event) => {
+        console.log(
+          `🟢 Stream went online! ${event.broadcasterDisplayName} is now live!`
+        );
+        this.isStreamOnline = true;
+        await this.connectAllBots();
+      },
+      onStreamOffline: async (event) => {
+        console.log(
+          `🔴 Stream went offline! ${event.broadcasterDisplayName} has ended the stream.`
+        );
+        this.isStreamOnline = false;
+        await this.disconnectAllBots();
+      },
+    });
+  }
+
+  private async checkStreamStatus() {
+    if (!this.streamService) {
+      console.warn("⚠️ Stream service not initialized");
+      return;
+    }
+
+    const isOnline = await this.streamService.isStreamOnline();
     
-    // Use user token for EventSub WebSocket
-    const authProvider = new RefreshingAuthProvider({
-      clientId: process.env.TWITCH_CLIENT_ID!,
-      clientSecret: process.env.TWITCH_CLIENT_SECRET!
-    });
-
-    authProvider.onRefresh(async (userId: string, newTokenData: AccessToken) => {
-      console.log(`🔄 Channel token refreshed`);
-      // TODO: Save refreshed token back to tokens.json
-    });
-
-    await authProvider.addUserForToken({
-      accessToken: channelToken.accessToken,
-      refreshToken: channelToken.refreshToken,
-      expiresIn: null,
-      obtainmentTimestamp: Date.now()
-    });
-
-    const apiClient = new ApiClient({ authProvider });
-    this.eventSubListener = new EventSubWsListener({ apiClient });
-
-    // Subscribe to stream online event
-    await this.eventSubListener.onStreamOnline(this.channelUserId!, async (event) => {
-      console.log(`🟢 Stream went online! ${event.broadcasterDisplayName} is now live!`);
+    if (isOnline) {
       this.isStreamOnline = true;
+      console.log("🎮 Stream is already online! Connecting bots...");
       await this.connectAllBots();
-    });
-
-    // Subscribe to stream offline event
-    await this.eventSubListener.onStreamOffline(this.channelUserId!, async (event) => {
-      console.log(`🔴 Stream went offline! ${event.broadcasterDisplayName} has ended the stream.`);
-      this.isStreamOnline = false;
-      await this.disconnectAllBots();
-    });
-
-    await this.eventSubListener.start();
-    console.log("✅ EventSub listener started");
+    } else {
+      console.log("⏳ Stream is offline. Bots will connect when stream goes online.");
+    }
   }
 
   private async initializeBots(botsTokens: Record<string, TokenData>) {
     console.log(`🤖 Initializing ${Object.keys(botsTokens).length} bot(s)...`);
-    
-    for (const [botName, tokenData] of Object.entries(botsTokens)) {
-      const authProvider = new RefreshingAuthProvider({
-        clientId: process.env.TWITCH_CLIENT_ID!,
-        clientSecret: process.env.TWITCH_CLIENT_SECRET!
-      });
 
-      authProvider.onRefresh(async (userId: string, newTokenData: AccessToken) => {
-        console.log(`🔄 Bot '${botName}' token refreshed`);
-        // TODO: Save refreshed token back to tokens.json
-      });
-
-      await authProvider.addUserForToken({
-        accessToken: tokenData.accessToken,
-        refreshToken: tokenData.refreshToken,
-        expiresIn: null,
-        obtainmentTimestamp: Date.now()
-      });
-
-      const chatClient = new ChatClient({
-        authProvider,
-        channels: [] // Will add channel when connecting
-      });
-
-      this.bots.set(botName, chatClient);
-      console.log(`✅ Bot '${botName}' initialized`);
+    // For now, we'll use the first bot token
+    const botEntries = Object.entries(botsTokens);
+    if (botEntries.length === 0) {
+      console.warn("⚠️ No bot tokens found");
+      return;
     }
+
+    const [botName, tokenData] = botEntries[0];
+
+    // Create a temporary token file for the bot
+    const botTokenPath = `./bot-${botName}-token.json`;
+    await this.saveBotToken(botTokenPath, tokenData);
+
+    // Initialize the TwitchChatBot
+    this.bot = new TwitchChatBot(
+      process.env.TWITCH_CLIENT_ID!,
+      process.env.TWITCH_CLIENT_SECRET!,
+      botTokenPath
+    );
+
+    await this.bot.initialize();
+
+    // Set up message handlers
+    this.setupBotMessageHandlers();
+
+    console.log(`✅ Bot '${botName}' initialized with chatbot service`);
+  }
+
+  private async saveBotToken(path: string, tokenData: TokenData) {
+    const botTokenFormat = {
+      accessToken: tokenData.accessToken,
+      refreshToken: tokenData.refreshToken,
+      expiresIn: 0, // Will be refreshed
+      obtainmentTimestamp: Date.now(),
+    };
+
+    await writeFile(path, JSON.stringify(botTokenFormat, null, 2));
+  }
+
+  private setupBotMessageHandlers() {
+    if (!this.bot) {
+      console.warn("⚠️ No bot initialized");
+      return;
+    }
+
+    // Set up message handler
+    this.bot.onMessage(
+      (channel: string, user: string, message: string, msg: any) => {
+        console.log(`[Bot] ${user}: ${message}`);
+
+        // Respond to some basic commands
+        if (message.toLowerCase() === "!hello") {
+          this.bot!.sendMessage(
+            channel,
+            `Hello ${user}! I'm a friendly bot 🤖`
+          );
+        } else if (message.toLowerCase() === "!time") {
+          const time = new Date().toLocaleTimeString();
+          this.bot!.sendMessage(channel, `The current time is ${time}`);
+        } else if (message.toLowerCase().includes("how are you")) {
+          this.bot!.sendMessage(
+            channel,
+            `I'm doing great, ${user}! Thanks for asking! How are you?`
+          );
+        }
+      }
+    );
   }
 
   private async connectAllBots() {
-    console.log("🔌 Connecting all bots to chat...");
-    
-    for (const [botName, chatClient] of Array.from(this.bots.entries())) {
-      try {
-        await chatClient.connect();
-        
-        // Join the channel
-        await chatClient.join(this.channelName!);
-        
-        console.log(`✅ Bot '${botName}' connected to channel #${this.channelName}`);
-        
-        // Set up message handlers
-        chatClient.onMessage((channel: string, user: string, text: string, msg: any) => {
-          console.log(`[${botName}] ${user}: ${text}`);
-          // Add your bot logic here
-        });
-      } catch (error) {
-        console.error(`❌ Failed to connect bot '${botName}':`, error);
-      }
+    console.log("🔌 Connecting bot to chat...");
+
+    if (!this.bot) {
+      console.warn("⚠️ No bot initialized");
+      return;
+    }
+
+    try {
+      await this.bot.connect();
+
+      // Join the channel
+      await this.bot.joinChannel(this.channelName);
+
+      console.log(`✅ Bot connected to channel #${this.channelName}`);
+
+      // Send a greeting message
+      await this.bot.sendMessage(
+        this.channelName,
+        "Hello chat! I'm here to keep you company! 👋"
+      );
+    } catch (error) {
+      console.error(`❌ Failed to connect bot:`, error);
     }
   }
 
   private async disconnectAllBots() {
-    console.log("🔌 Disconnecting all bots from chat...");
-    
-    for (const [botName, chatClient] of Array.from(this.bots.entries())) {
-      try {
-        await chatClient.quit();
-        console.log(`✅ Bot '${botName}' disconnected from chat`);
-      } catch (error) {
-        console.error(`❌ Failed to disconnect bot '${botName}':`, error);
-      }
+    console.log("🔌 Disconnecting bot from chat...");
+
+    if (!this.bot) {
+      return;
+    }
+
+    try {
+      await this.bot.leaveChannel(this.channelName);
+      await this.bot.disconnect();
+      console.log(`✅ Bot disconnected from chat`);
+    } catch (error) {
+      console.error(`❌ Failed to disconnect bot:`, error);
     }
   }
 
   async stop() {
     console.log("🛑 Stopping BotOrchestrator...");
-    
+
     // Disconnect all bots
     await this.disconnectAllBots();
-    
-    // Stop EventSub listener
-    if (this.eventSubListener) {
-      this.eventSubListener.stop();
+
+    // Stop EventSub service
+    if (this.eventSubService) {
+      await this.eventSubService.stop();
     }
-    
+
     console.log("✅ BotOrchestrator stopped");
   }
 }
