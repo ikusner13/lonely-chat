@@ -1,7 +1,9 @@
 {
   "name": "stream",
   "scripts": {
-    "dev": "dotenv -e .env -- bun run --hot src/index.ts"
+    "dev": "dotenv -e .env -- bun run --hot src/index.ts",
+    "generate-token": "dotenv -e .env -- bun run src/scripts/generate-tokens.ts",
+    "generate-channel-token": "dotenv -e .env -- bun run src/scripts/generate-channel-token.ts"
   },
   "dependencies": {
     "@twurple/api": "^7.3.0",
