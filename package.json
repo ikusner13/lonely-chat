@@ -4,8 +4,10 @@
     "dev": "dotenv -e .env -- bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@twurple/api": "^7.3.0",
     "@twurple/auth": "^7.3.0",
     "@twurple/chat": "^7.3.0",
+    "@twurple/eventsub-ws": "^7.3.0",
     "arctic": "^3.7.0",
     "hono": "^4.8.5"
   },

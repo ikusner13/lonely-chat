@@ -129,26 +129,14 @@ export class TwitchChatBot {
     }
   }
 
-  // Add custom command handler
-  onCommand(
-    command: string,
+  onMessage(
     handler: (
       channel: string,
       user: string,
-      args: string[],
+      message: string,
       msg: ChatMessage
     ) => void
   ): void {
-    this.chatClient.onMessage(
-      (channel: string, user: string, message: string, msg: ChatMessage) => {
-        if (message.startsWith(`!${command}`)) {
-          const args = message
-            .slice(command.length + 2)
-            .trim()
-            .split(" ");
-          handler(channel, user, args, msg);
-        }
-      }
-    );
+    this.chatClient.onMessage(handler);
   }
 }
