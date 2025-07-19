@@ -125,13 +125,15 @@ export class BotOrchestrator {
     }
 
     const isOnline = await this.streamService.isStreamOnline();
-    
+
     if (isOnline) {
       this.isStreamOnline = true;
       console.log("🎮 Stream is already online! Connecting bots...");
       await this.connectAllBots();
     } else {
-      console.log("⏳ Stream is offline. Bots will connect when stream goes online.");
+      console.log(
+        "⏳ Stream is offline. Bots will connect when stream goes online."
+      );
     }
   }
 

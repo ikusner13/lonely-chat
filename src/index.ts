@@ -1,7 +1,7 @@
-import { BotOrchestrator } from "./BotOrchestrator";
+import { MultiBotOrchestrator } from "./MultiBotOrchestrator";
 
-// Create and start the bot orchestrator
-const orchestrator = new BotOrchestrator();
+// Create and start the multi-bot orchestrator
+const orchestrator = new MultiBotOrchestrator();
 
 // Start the orchestrator
 orchestrator.start().catch((error) => {

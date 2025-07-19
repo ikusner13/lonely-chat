@@ -7,10 +7,12 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^1.0.0-beta.2",
     "@twurple/api": "^7.3.0",
     "@twurple/auth": "^7.3.0",
     "@twurple/chat": "^7.3.0",
     "@twurple/eventsub-ws": "^7.3.0",
+    "ai": "5.0.0-beta.10",
     "arctic": "^3.7.0",
     "hono": "^4.8.5"
   },
