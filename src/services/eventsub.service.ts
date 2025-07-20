@@ -1,6 +1,6 @@
-import { RefreshingAuthProvider, AccessToken } from "@twurple/auth";
-import { ApiClient } from "@twurple/api";
-import { EventSubWsListener } from "@twurple/eventsub-ws";
+import { ApiClient } from '@twurple/api';
+import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
+import { EventSubWsListener } from '@twurple/eventsub-ws';
 
 interface TokenData {
   accessToken: string;
@@ -10,7 +10,9 @@ interface TokenData {
 }
 
 interface StreamCallbacks {
+  // biome-ignore lint/suspicious/noExplicitAny: this will be fixed in refactor
   onStreamOnline?: (event: any) => Promise<void>;
+  // biome-ignore lint/suspicious/noExplicitAny: this will be fixed in refactor
   onStreamOffline?: (event: any) => Promise<void>;
 }
 
@@ -38,7 +40,7 @@ export class EventSubService {
     channelToken: TokenData,
     callbacks: StreamCallbacks
   ): Promise<void> {
-    console.log("📡 Initializing EventSub service...");
+    console.log('📡 Initializing EventSub service...');
 
     // Create auth provider
     this.authProvider = new RefreshingAuthProvider({
@@ -81,20 +83,20 @@ export class EventSubService {
 
     // Start the listener
     await this.eventSubListener.start();
-    console.log("✅ EventSub service initialized and listening");
+    console.log('✅ EventSub service initialized and listening');
   }
 
   private async cleanupExistingSubscriptions(): Promise<void> {
     try {
-      console.log("🧹 Cleaning up ALL existing EventSub subscriptions...");
+      console.log('🧹 Cleaning up ALL existing EventSub subscriptions...');
 
       // Delete ALL subscriptions to prevent accumulation during hot reload
       // This is the recommended approach from Twurple docs for development
       await this.apiClient.eventSub.deleteAllSubscriptions();
 
-      console.log("✅ Successfully deleted all EventSub subscriptions");
+      console.log('✅ Successfully deleted all EventSub subscriptions');
     } catch (error) {
-      console.error("❌ Error cleaning up existing subscriptions:", error);
+      console.error('❌ Error cleaning up existing subscriptions:', error);
       // Continue anyway - we don't want to block startup
       // The error might be due to no subscriptions existing
     }
@@ -113,7 +115,7 @@ export class EventSubService {
         this.channelUserId,
         callbacks.onStreamOnline
       );
-      console.log("✅ Subscribed to stream.online events");
+      console.log('✅ Subscribed to stream.online events');
     }
 
     // Subscribe to stream offline event
@@ -126,19 +128,19 @@ export class EventSubService {
         this.channelUserId,
         callbacks.onStreamOffline
       );
-      console.log("✅ Subscribed to stream.offline events");
+      console.log('✅ Subscribed to stream.offline events');
     }
   }
 
-  async stop(): Promise<void> {
-    console.log("🛑 Stopping EventSub service...");
+  stop(): void {
+    console.log('🛑 Stopping EventSub service...');
 
     if (this.eventSubListener) {
-      console.log("🔌 Stopping EventSub listener...");
+      console.log('🔌 Stopping EventSub listener...');
       this.eventSubListener.stop();
     }
 
-    console.log("✅ EventSub service stopped");
+    console.log('✅ EventSub service stopped');
   }
 
   setTokenRefreshCallback(callback: TokenRefreshCallback): void {

@@ -1,5 +1,5 @@
-import { RefreshingAuthProvider, AccessToken } from "@twurple/auth";
-import { ChatClient, ChatMessage } from "@twurple/chat";
+import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
+import { ChatClient, type ChatMessage } from '@twurple/chat';
 
 interface TokenData {
   accessToken: string;
@@ -44,6 +44,7 @@ export class TwitchChatBot {
         // Update internal token data
         this.tokenData = {
           accessToken: newTokenData.accessToken,
+          // biome-ignore lint/style/noNonNullAssertion: refresh token is there
           refreshToken: newTokenData.refreshToken!,
           expiresIn: newTokenData.expiresIn ?? 0,
           obtainmentTimestamp: newTokenData.obtainmentTimestamp,
@@ -57,7 +58,7 @@ export class TwitchChatBot {
     );
 
     // Add the stored tokens
-    await this.authProvider.addUserForToken(this.tokenData, ["chat"]);
+    await this.authProvider.addUserForToken(this.tokenData, ['chat']);
 
     // Create chat client
     this.chatClient = new ChatClient({
@@ -72,14 +73,14 @@ export class TwitchChatBot {
   private setupEventHandlers(): void {
     // Handle successful connection
     this.chatClient.onConnect(() => {
-      console.log("Connected to Twitch chat");
+      console.log('Connected to Twitch chat');
     });
 
     // Handle disconnection
     this.chatClient.onDisconnect((manually: boolean) => {
       console.log(
         `Disconnected from Twitch chat ${
-          manually ? "manually" : "unexpectedly"
+          manually ? 'manually' : 'unexpectedly'
         }`
       );
     });
@@ -90,18 +91,18 @@ export class TwitchChatBot {
         console.log(`[${channel}] ${user}: ${message}`);
 
         // Example: Respond to !hello command
-        if (message === "!hello") {
+        if (message === '!hello') {
           this.chatClient.say(channel, `Hello ${user}!`);
         }
       }
     );
   }
 
-  async connect(): Promise<void> {
+  connect(): void {
     this.chatClient.connect();
   }
 
-  async disconnect(): Promise<void> {
+  disconnect(): void {
     this.chatClient.quit();
   }
 
@@ -109,7 +110,7 @@ export class TwitchChatBot {
     await this.chatClient.join(channel);
   }
 
-  async leaveChannel(channel: string): Promise<void> {
+  leaveChannel(channel: string): void {
     this.chatClient.part(channel);
   }
 
