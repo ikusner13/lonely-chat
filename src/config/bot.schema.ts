@@ -10,7 +10,6 @@ export const AIModelSchema = z
     title: 'AI Model',
     examples: ['moonshotai/kimi-k2:free', 'openai/gpt-4o-mini'],
   });
-
 export type AIModel = z.infer<typeof AIModelSchema>;
 
 export const BotNameSchema = z
@@ -23,41 +22,7 @@ export const BotNameSchema = z
     title: 'Bot Name',
     examples: ['stickyman1776'],
   });
-
 export type BotName = z.infer<typeof BotNameSchema>;
-
-export const ResponseChanceSchema = z
-  .object({
-    question: z
-      .number({
-        error: 'Question response chance must be a number',
-      })
-      .min(0, { error: 'Question response chance must be at least 0' })
-      .max(1, { error: 'Question response chance must be at most 1' })
-      .describe('Probability (0-1) of responding to questions'),
-    greeting: z
-      .number({
-        error: 'Greeting response chance must be a number',
-      })
-      .min(0, { error: 'Greeting response chance must be at least 0' })
-      .max(1, { error: 'Greeting response chance must be at most 1' })
-      .describe('Probability (0-1) of responding to greetings'),
-    general: z
-      .number({
-        error: 'General response chance must be a number',
-      })
-      .min(0, { error: 'General response chance must be at least 0' })
-      .max(1, { error: 'General response chance must be at most 1' })
-      .describe('Probability (0-1) of responding to general messages'),
-  })
-  .describe('Response probability configuration for different message types')
-  .meta({
-    id: 'ResponseChance',
-    title: 'Response Chances',
-    examples: [{ question: 0.8, greeting: 0.9, general: 0.3 }],
-  });
-
-export type ResponseChance = z.infer<typeof ResponseChanceSchema>;
 
 export const BotPersonalitySchema = z
   .object({
@@ -94,13 +59,6 @@ export const BotPersonalitySchema = z
       .max(4000, { error: 'Max tokens cannot exceed 4000' })
       .default(150)
       .describe('Maximum number of tokens in bot responses'),
-    interests: z
-      .array(z.string(), {
-        error: 'Interests must be an array of strings',
-      })
-      .optional()
-      .describe('Topics the bot is interested in for conversation targeting'),
-    responseChance: ResponseChanceSchema.optional(),
   })
   .describe('Complete configuration for a bot personality')
   .meta({
@@ -116,7 +74,6 @@ export const BotPersonalitySchema = z
       },
     ],
   });
-
 export type BotPersonality = z.infer<typeof BotPersonalitySchema>;
 
 export const BotConfigSchema = z
@@ -141,7 +98,6 @@ export const BotConfigSchema = z
       },
     ],
   });
-
 export type BotConfig = z.infer<typeof BotConfigSchema>;
 
 export interface FormattedError {
