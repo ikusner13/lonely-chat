@@ -1,6 +1,5 @@
 import { type BotConfig, loadBotConfig } from './bot.schema';
 
-// Define bot configurations with full type safety
 const botConfig: BotConfig = {
   stickyman1776: {
     name: 'Stickyman1776',
@@ -17,7 +16,6 @@ const botConfig: BotConfig = {
   },
 };
 
-// Load and validate configuration on module initialization
 loadBotConfig(botConfig);
 
 export { botConfig };
