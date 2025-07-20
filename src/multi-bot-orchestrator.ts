@@ -76,10 +76,12 @@ export class MultiBotOrchestrator {
 
     await this.streamService.initialize(tokens.channel);
 
-    // Initialize EventSub with user token for channel monitoring
     if (env.DISABLE_EVENTSUB) {
-      console.log('⚠️ EventSub is disabled via DISABLE_EVENTSUB environment variable');
+      console.log(
+        '⚠️ EventSub is disabled via DISABLE_EVENTSUB environment variable'
+      );
     } else {
+      // Initialize EventSub with user token for channel monitoring
       await this.initializeEventSub(tokens.channel);
     }
 
@@ -141,7 +143,10 @@ export class MultiBotOrchestrator {
       return;
     }
 
-    const isOnline = await this.streamService.isStreamOnline();
+    const isOnline =
+      env.NODE_ENV === 'development'
+        ? true
+        : await this.streamService.isStreamOnline();
 
     if (isOnline) {
       this.isStreamOnline = true;

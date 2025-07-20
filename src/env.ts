@@ -15,9 +15,10 @@ export const env = createEnv({
     DISABLE_EVENTSUB: z
       .string()
       // transform to boolean using preferred coercion logic
-      .transform((s) => s !== "false" && s !== "0")
+      .transform((s) => s !== 'false' && s !== '0')
       .optional()
       .default(false),
+    NODE_ENV: z.enum(['development', 'production']).default('development'),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
