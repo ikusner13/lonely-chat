@@ -73,6 +73,9 @@ export class EventSubService {
       apiClient: this.apiClient,
     });
 
+    // Clean up any existing subscriptions before creating new ones
+    await this.cleanupExistingSubscriptions();
+
     // Subscribe to stream events
     await this.subscribeToStreamEvents(callbacks);
 
@@ -81,11 +84,31 @@ export class EventSubService {
     console.log("✅ EventSub service initialized and listening");
   }
 
+  private async cleanupExistingSubscriptions(): Promise<void> {
+    try {
+      console.log("🧹 Cleaning up ALL existing EventSub subscriptions...");
+
+      // Delete ALL subscriptions to prevent accumulation during hot reload
+      // This is the recommended approach from Twurple docs for development
+      await this.apiClient.eventSub.deleteAllSubscriptions();
+
+      console.log("✅ Successfully deleted all EventSub subscriptions");
+    } catch (error) {
+      console.error("❌ Error cleaning up existing subscriptions:", error);
+      // Continue anyway - we don't want to block startup
+      // The error might be due to no subscriptions existing
+    }
+  }
+
   private async subscribeToStreamEvents(
     callbacks: StreamCallbacks
   ): Promise<void> {
     // Subscribe to stream online event
     if (callbacks.onStreamOnline) {
+      console.log(
+        `📋 Creating stream.online subscription for channel ${this.channelUserId}`
+      );
+
       await this.eventSubListener.onStreamOnline(
         this.channelUserId,
         callbacks.onStreamOnline
@@ -95,6 +118,10 @@ export class EventSubService {
 
     // Subscribe to stream offline event
     if (callbacks.onStreamOffline) {
+      console.log(
+        `📋 Creating stream.offline subscription for channel ${this.channelUserId}`
+      );
+
       await this.eventSubListener.onStreamOffline(
         this.channelUserId,
         callbacks.onStreamOffline
@@ -107,6 +134,7 @@ export class EventSubService {
     console.log("🛑 Stopping EventSub service...");
 
     if (this.eventSubListener) {
+      console.log("🔌 Stopping EventSub listener...");
       this.eventSubListener.stop();
     }
 
