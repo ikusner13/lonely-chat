@@ -9,6 +9,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "downlevelIteration": true,
-    "lib": ["es2022"]
+    "lib": ["es2022"],
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/env": ["src/env"],
+      "@/services/*": ["src/services/*"],
+      "@/scripts/*": ["src/scripts/*"]
+    }
   }
 }

@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage } from 'ai';
 
 // Message type for conversation history
 export type ChatMessage = ModelMessage & {
@@ -65,7 +65,7 @@ export class ConversationManager {
     const context = this.getOrCreateContext(channelName);
 
     const userMessage: ChatMessage = {
-      role: "user",
+      role: 'user',
       content: `${user}: ${message}`,
       timestamp: new Date(),
       author: user,
@@ -85,7 +85,7 @@ export class ConversationManager {
     const context = this.getOrCreateContext(channelName);
 
     const botMessage: ChatMessage = {
-      role: "assistant",
+      role: 'assistant',
       content: response,
       timestamp: new Date(),
       author: botName,
@@ -107,10 +107,10 @@ export class ConversationManager {
     // Convert shared context to bot's perspective
     return context.messages.map((msg) => {
       // If this is an assistant message from another bot, convert to user message
-      if (msg.role === "assistant" && msg.author && msg.author !== botName) {
+      if (msg.role === 'assistant' && msg.author && msg.author !== botName) {
         return {
           ...msg,
-          role: "user",
+          role: 'user',
           content: `${msg.author}: ${msg.content}`,
         };
       }
@@ -145,7 +145,9 @@ export class ConversationManager {
    */
   isConversationActive(channelName: string): boolean {
     const context = this.conversations.get(channelName);
-    if (!context) return false;
+    if (!context) {
+      return false;
+    }
 
     const timeSinceLastActivity = Date.now() - context.lastActivity.getTime();
     return timeSinceLastActivity < this.contextTimeoutMs;
@@ -158,9 +160,9 @@ export class ConversationManager {
     if (context.messages.length > this.maxContextMessages) {
       // Keep system messages and recent messages
       const systemMessages = context.messages.filter(
-        (m) => m.role === "system"
+        (m) => m.role === 'system'
       );
-      const otherMessages = context.messages.filter((m) => m.role !== "system");
+      const otherMessages = context.messages.filter((m) => m.role !== 'system');
 
       // Keep more recent messages
       const recentMessages = otherMessages.slice(-this.maxContextMessages);
@@ -214,7 +216,9 @@ export class ConversationManager {
     duration: number;
   } | null {
     const context = this.conversations.get(channelName);
-    if (!context) return null;
+    if (!context) {
+      return null;
+    }
 
     const firstMessage = context.messages[0];
     const duration = firstMessage

@@ -1,9 +1,14 @@
-import { EventSubService } from "./services/eventsub.service";
-import { StreamService } from "./services/stream.service";
-import { AIService, BOT_PERSONALITIES, BotName } from "./services/ai.service";
-import { TokenManager } from "./services/token.service";
-import { ConversationManager } from "./services/conversation.service";
-import { BotManager } from "./services/bot-manager.service";
+import { env } from '@/env';
+import {
+  AIService,
+  BOT_PERSONALITIES,
+  type BotName,
+} from './services/ai.service';
+import { BotManager } from './services/bot-manager.service';
+import { ConversationManager } from './services/conversation.service';
+import { EventSubService } from './services/eventsub.service';
+import { StreamService } from './services/stream.service';
+import { type TokenData, TokenManager } from './services/token.service';
 
 interface ConversationState {
   isActive: boolean;
@@ -33,43 +38,42 @@ export class MultiBotOrchestrator {
     minTimeBetweenBotMessages: 10_000, // 10 seconds (faster for single bot)
     maxTimeBetweenBotMessages: 20_000, // 20 seconds
     maxBotsPerConversation: 3,
-    conversationTimeoutMs: 30000, // 30 seconds
+    conversationTimeoutMs: 30_000, // 30 seconds
   };
 
   constructor() {
     // Get channel info from environment variables
-    this.channelUserId = process.env.TWITCH_CHANNEL_ID!;
-    this.channelName = process.env.TWITCH_CHANNEL_NAME!;
+    this.channelUserId = env.TWITCH_CHANNEL_ID;
+    this.channelName = env.TWITCH_CHANNEL_NAME;
 
     // Initialize managers
     this.tokenManager = new TokenManager();
     this.conversationManager = new ConversationManager();
     this.aiService = new AIService(this.conversationManager);
     this.botManager = new BotManager({
-      clientId: process.env.TWITCH_CLIENT_ID!,
-      clientSecret: process.env.TWITCH_CLIENT_SECRET!,
+      clientId: env.TWITCH_CLIENT_ID,
+      clientSecret: env.TWITCH_CLIENT_SECRET,
       tokenManager: this.tokenManager,
     });
   }
 
   async start() {
-    console.log("🚀 Starting MultiBotOrchestrator...");
+    console.log('🚀 Starting MultiBotOrchestrator...');
 
     // Load tokens
     const tokens = await this.tokenManager.loadTokens();
 
     if (!tokens.channel) {
       console.error(
-        "❌ No channel tokens found. Run: bun run generate-channel-token"
+        '❌ No channel tokens found. Run: bun run generate-channel-token'
       );
       return;
     }
 
     // Initialize stream service
     this.streamService = new StreamService(
-      process.env.TWITCH_CLIENT_ID!,
-      process.env.TWITCH_CLIENT_SECRET!,
-      this.channelUserId,
+      env.TWITCH_CLIENT_ID,
+      env.TWITCH_CLIENT_SECRET,
       this.channelName
     );
 
@@ -87,16 +91,16 @@ export class MultiBotOrchestrator {
     // Check if stream is currently online
     await this.checkStreamStatus();
 
-    console.log("✅ MultiBotOrchestrator started successfully");
+    console.log('✅ MultiBotOrchestrator started successfully');
   }
 
-  private async initializeEventSub(channelToken: any) {
-    console.log("📡 Initializing EventSub service...");
+  private async initializeEventSub(channelToken: TokenData) {
+    console.log('📡 Initializing EventSub service...');
 
     // Create EventSub service
     this.eventSubService = new EventSubService(
-      process.env.TWITCH_CLIENT_ID!,
-      process.env.TWITCH_CLIENT_SECRET!,
+      env.TWITCH_CLIENT_ID,
+      env.TWITCH_CLIENT_SECRET,
       this.channelUserId
     );
 
@@ -132,7 +136,7 @@ export class MultiBotOrchestrator {
 
   private async checkStreamStatus() {
     if (!this.streamService) {
-      console.warn("⚠️ Stream service not initialized");
+      console.warn('⚠️ Stream service not initialized');
       return;
     }
 
@@ -140,11 +144,11 @@ export class MultiBotOrchestrator {
 
     if (isOnline) {
       this.isStreamOnline = true;
-      console.log("🎮 Stream is already online! Connecting bots...");
+      console.log('🎮 Stream is already online! Connecting bots...');
       await this.botManager.connectAllBots(this.channelName, true);
     } else {
       console.log(
-        "⏳ Stream is offline. Bots will connect when stream goes online."
+        '⏳ Stream is offline. Bots will connect when stream goes online.'
       );
     }
   }
@@ -155,7 +159,7 @@ export class MultiBotOrchestrator {
     for (const botName of botNames) {
       this.botManager.setMessageHandler(
         botName,
-        async (channel: string, user: string, message: string, msg: any) => {
+        async (channel: string, user: string, message: string) => {
           // Don't process messages from bots themselves
           if (this.botManager.isBotUsername(user)) {
             return;
@@ -190,9 +194,9 @@ export class MultiBotOrchestrator {
     }
   }
 
-  private async determineRespondingBots(
-    analysis: ReturnType<AIService["analyzeMessageTriggers"]>
-  ): Promise<BotName[]> {
+  private determineRespondingBots(
+    analysis: ReturnType<AIService['analyzeMessageTriggers']>
+  ): BotName[] {
     const respondingBots: BotName[] = [];
 
     // If specific bots are mentioned, they should respond
@@ -219,7 +223,9 @@ export class MultiBotOrchestrator {
   ) {
     const bot = this.botManager.getBot(botName);
 
-    if (!bot || !this.isStreamOnline) return;
+    if (!(bot && this.isStreamOnline)) {
+      return;
+    }
 
     try {
       // Get list of other bots for context
@@ -253,7 +259,7 @@ export class MultiBotOrchestrator {
   }
 
   async stop() {
-    console.log("🛑 Stopping MultiBotOrchestrator...");
+    console.log('🛑 Stopping MultiBotOrchestrator...');
 
     // Disconnect all bots
     await this.botManager.disconnectAllBots(this.channelName);
@@ -272,6 +278,6 @@ export class MultiBotOrchestrator {
     // Clean up bot resources
     await this.botManager.cleanup();
 
-    console.log("✅ MultiBotOrchestrator stopped");
+    console.log('✅ MultiBotOrchestrator stopped');
   }
 }

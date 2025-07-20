@@ -1,6 +1,7 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, ModelMessage } from "ai";
-import { ConversationManager, ChatMessage } from "./conversation.service";
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { generateText, type ModelMessage } from 'ai';
+import { env } from '@/env';
+import type { ChatMessage, ConversationManager } from './conversation.service';
 
 // Bot personality configuration
 export interface BotPersonality {
@@ -16,7 +17,7 @@ export class AIService {
   private conversationManager: ConversationManager;
 
   constructor(conversationManager: ConversationManager) {
-    this.openrouter = createOpenRouter();
+    this.openrouter = createOpenRouter({ apiKey: env.OPENROUTER_KEY });
     this.conversationManager = conversationManager;
   }
 
@@ -58,8 +59,8 @@ export class AIService {
       const personality = BOT_PERSONALITIES[botName];
 
       // Debug logging
-      console.log("Personality:", personality);
-      console.log("Model:", personality.model);
+      console.log('Personality:', personality);
+      console.log('Model:', personality.model);
 
       // Generate response using the AI model
       const result = await generateText({
@@ -120,10 +121,12 @@ export class AIService {
 
     if (otherBots.length > 0) {
       prompt += `\n\nYou are ${botName}. You're chatting alongside these other bots: ${otherBots.join(
-        ", "
+        ', '
       )}. `;
-      prompt += `You can interact with them naturally, respond to their messages, and have conversations with them. `;
-      prompt += `Remember each bot has their own personality - engage with them as you would with real people in chat.`;
+      prompt +=
+        'You can interact with them naturally, respond to their messages, and have conversations with them. ';
+      prompt +=
+        'Remember each bot has their own personality - engage with them as you would with real people in chat.';
     } else {
       prompt += `\n\nYou are ${botName}.`;
     }
@@ -144,12 +147,12 @@ export class AIService {
   }
 }
 
-export type BotName = "stickyman1776";
+export type BotName = 'stickyman1776';
 
 export const BOT_PERSONALITIES: Record<BotName, BotPersonality> = {
   stickyman1776: {
-    name: "Stickyman1776",
-    model: "moonshotai/kimi-k2:free",
+    name: 'Stickyman1776',
+    model: 'moonshotai/kimi-k2:free',
     systemPrompt: `You are the ultimate positive supporter in chat! You're always encouraging, celebrating wins, and keeping morale high. You use lots of hype emotes and positive language. You're genuinely enthusiastic about everything and love to cheer for both the streamer and other chatters.`,
     temperature: 0.8,
     maxTokens: 100,

@@ -1,5 +1,5 @@
-import { ApiClient } from "@twurple/api";
-import { RefreshingAuthProvider } from "@twurple/auth";
+import { ApiClient } from '@twurple/api';
+import { RefreshingAuthProvider } from '@twurple/auth';
 
 interface TokenData {
   accessToken: string;
@@ -11,19 +11,11 @@ interface TokenData {
 export class StreamService {
   private apiClient!: ApiClient;
   private authProvider: RefreshingAuthProvider;
-  private channelUserId: string;
   private channelName: string;
 
-  constructor(
-    clientId: string,
-    clientSecret: string,
-    channelUserId: string,
-    channelName: string
-  ) {
-    this.channelUserId = channelUserId;
+  constructor(clientId: string, clientSecret: string, channelName: string) {
     this.channelName = channelName;
 
-    // Create auth provider
     this.authProvider = new RefreshingAuthProvider({
       clientId,
       clientSecret,
@@ -39,7 +31,6 @@ export class StreamService {
       obtainmentTimestamp: channelToken.obtainmentTimestamp || Date.now(),
     });
 
-    // Create API client
     this.apiClient = new ApiClient({ authProvider: this.authProvider });
   }
 
@@ -58,12 +49,11 @@ export class StreamService {
         console.log(`   Game: ${stream.gameName}`);
         console.log(`   Viewers: ${stream.viewers}`);
         return true;
-      } else {
-        console.log(`🔴 Stream is OFFLINE`);
-        return false;
       }
+      console.log('🔴 Stream is OFFLINE');
+      return false;
     } catch (error) {
-      console.error("❌ Error checking stream status:", error);
+      console.error('❌ Error checking stream status:', error);
       return false;
     }
   }
@@ -75,7 +65,7 @@ export class StreamService {
       );
       return stream;
     } catch (error) {
-      console.error("❌ Error getting stream info:", error);
+      console.error('❌ Error getting stream info:', error);
       return null;
     }
   }
