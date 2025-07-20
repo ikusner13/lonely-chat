@@ -1,5 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, ModelMessage, streamText, UIMessage } from "ai";
+import { generateText, ModelMessage } from "ai";
+import { ConversationManager, ChatMessage } from "./conversation.service";
 
 // Bot personality configuration
 export interface BotPersonality {
@@ -10,32 +11,13 @@ export interface BotPersonality {
   maxTokens?: number;
 }
 
-// Message type for conversation history
-export type ChatMessage = ModelMessage & {
-  timestamp: Date;
-  author?: string; // For identifying who said what
-};
-
-// Shared conversation context for a channel
-export interface ConversationContext {
-  channelName: string;
-  messages: ChatMessage[];
-  lastActivity: Date;
-  currentTopic?: string;
-  participants: Set<string>; // Track who's in the conversation
-}
-
 export class AIService {
   private openrouter;
-  private conversations: Map<string, ConversationContext> = new Map();
-  private maxContextMessages = 50; // Higher limit for multi-bot conversations
-  private contextTimeoutMs = 60 * 60 * 1000; // 1 hour for multi-bot convos
+  private conversationManager: ConversationManager;
 
-  constructor() {
+  constructor(conversationManager: ConversationManager) {
     this.openrouter = createOpenRouter();
-
-    // Start cleanup interval for old conversations
-    setInterval(() => this.cleanupOldConversations(), 10 * 60 * 1000); // Every 10 minutes
+    this.conversationManager = conversationManager;
   }
 
   /**
@@ -55,24 +37,20 @@ export class AIService {
     otherBots: BotName[];
   }): Promise<string | null> {
     try {
-      // Get or create conversation context
-      const context = this.getOrCreateContext(channelName);
-
       // If there's a trigger message, add it to context first
       if (triggerMessage && triggerUser) {
-        const userMessage: ChatMessage = {
-          role: "user",
-          content: `${triggerUser}: ${triggerMessage}`,
-          timestamp: new Date(),
-          author: triggerUser,
-        };
-
-        // Add to shared context
-        context.messages.push(userMessage);
+        this.conversationManager.addUserMessage(
+          channelName,
+          triggerUser,
+          triggerMessage
+        );
       }
 
-      // Build the messages for this specific bot
-      const messages = this.buildMessagesForBot(context, botName);
+      // Get messages formatted for this specific bot
+      const messages = this.conversationManager.getMessagesForBot(
+        channelName,
+        botName
+      );
 
       // Convert messages to AI SDK format
       const aiMessages = this.convertToAIMessages(messages);
@@ -92,39 +70,18 @@ export class AIService {
         maxOutputTokens: personality.maxTokens || 150,
       });
 
-      // Add the bot's response to shared context
-      const botMessage: ChatMessage = {
-        role: "assistant",
-        content: result.text,
-        timestamp: new Date(),
-        author: botName,
-      };
-      context.messages.push(botMessage);
-
-      // Track participant
-      context.participants.add(botName);
-      if (triggerUser) {
-        context.participants.add(triggerUser);
-      }
-
-      // Update last activity
-      context.lastActivity = new Date();
-
-      // Trim context if needed
-      this.trimContext(context);
+      // Add the bot's response to conversation
+      this.conversationManager.addBotResponse(
+        channelName,
+        botName,
+        result.text
+      );
 
       return result.text;
     } catch (error) {
       console.error(`Error generating AI response for ${botName}:`, error);
       return null;
     }
-  }
-
-  /**
-   * Clear conversation context for a channel
-   */
-  clearContext(channelName: string): void {
-    this.conversations.delete(channelName);
   }
 
   /**
@@ -175,27 +132,6 @@ export class AIService {
   }
 
   /**
-   * Build messages array from bot's perspective
-   */
-  private buildMessagesForBot(
-    context: ConversationContext,
-    botName: BotName
-  ): ChatMessage[] {
-    // Convert shared context to bot's perspective
-    return context.messages.map((msg) => {
-      // If this is an assistant message from another bot, convert to user message
-      if (msg.role === "assistant" && msg.author && msg.author !== botName) {
-        return {
-          ...msg,
-          role: "user",
-          content: `${msg.author}: ${msg.content}`,
-        };
-      }
-      return msg;
-    });
-  }
-
-  /**
    * Convert ChatMessage to AI SDK format
    */
   private convertToAIMessages(messages: ChatMessage[]): ModelMessage[] {
@@ -205,57 +141,6 @@ export class AIService {
         role: msg.role,
       } as ModelMessage;
     });
-  }
-
-  /**
-   * Get or create conversation context
-   */
-  private getOrCreateContext(channelName: string): ConversationContext {
-    let context = this.conversations.get(channelName);
-
-    if (!context) {
-      context = {
-        channelName,
-        messages: [],
-        lastActivity: new Date(),
-        participants: new Set(),
-      };
-      this.conversations.set(channelName, context);
-    }
-
-    return context;
-  }
-
-  /**
-   * Trim conversation context to prevent token overflow
-   */
-  private trimContext(context: ConversationContext): void {
-    if (context.messages.length > this.maxContextMessages) {
-      // Keep system messages and recent messages
-      const systemMessages = context.messages.filter(
-        (m) => m.role === "system"
-      );
-      const otherMessages = context.messages.filter((m) => m.role !== "system");
-
-      // Keep more recent messages for multi-bot conversations
-      const recentMessages = otherMessages.slice(-this.maxContextMessages);
-      context.messages = [...systemMessages.slice(-5), ...recentMessages];
-    }
-  }
-
-  /**
-   * Clean up old conversations to prevent memory leaks
-   */
-  private cleanupOldConversations(): void {
-    const now = new Date();
-    const cutoffTime = now.getTime() - this.contextTimeoutMs;
-
-    for (const [channelName, context] of this.conversations.entries()) {
-      if (context.lastActivity.getTime() < cutoffTime) {
-        this.conversations.delete(channelName);
-        console.log(`Cleaned up old conversation context for ${channelName}`);
-      }
-    }
   }
 }
 

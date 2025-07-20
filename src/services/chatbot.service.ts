@@ -1,6 +1,5 @@
 import { RefreshingAuthProvider, AccessToken } from "@twurple/auth";
 import { ChatClient, ChatMessage } from "@twurple/chat";
-import { promises as fs } from "fs";
 
 interface TokenData {
   accessToken: string;
@@ -9,27 +8,30 @@ interface TokenData {
   obtainmentTimestamp: number;
 }
 
+export type TokenRefreshCallback = (
+  userId: string,
+  newTokenData: AccessToken
+) => Promise<void>;
+
 export class TwitchChatBot {
   private authProvider!: RefreshingAuthProvider;
   private chatClient!: ChatClient;
   private clientId: string;
   private clientSecret: string;
-  private tokenFilePath: string;
+  private tokenData: TokenData;
+  private onTokenRefresh?: TokenRefreshCallback;
 
-  constructor(
-    clientId: string,
-    clientSecret: string,
-    tokenFilePath: string = "./tokens.json"
-  ) {
+  constructor(clientId: string, clientSecret: string, tokenData: TokenData) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
-    this.tokenFilePath = tokenFilePath;
+    this.tokenData = tokenData;
+  }
+
+  setTokenRefreshCallback(callback: TokenRefreshCallback): void {
+    this.onTokenRefresh = callback;
   }
 
   async initialize(): Promise<void> {
-    // Load token data
-    const tokenData = await this.loadTokenData();
-
     // Create auth provider
     this.authProvider = new RefreshingAuthProvider({
       clientId: this.clientId,
@@ -38,23 +40,29 @@ export class TwitchChatBot {
 
     // Set up token refresh callback
     this.authProvider.onRefresh(
-      async (_userId: string, newTokenData: AccessToken) => {
-        await this.saveTokenData({
+      async (userId: string, newTokenData: AccessToken) => {
+        // Update internal token data
+        this.tokenData = {
           accessToken: newTokenData.accessToken,
           refreshToken: newTokenData.refreshToken!,
           expiresIn: newTokenData.expiresIn ?? 0,
           obtainmentTimestamp: newTokenData.obtainmentTimestamp,
-        });
+        };
+
+        // Call external callback if provided
+        if (this.onTokenRefresh) {
+          await this.onTokenRefresh(userId, newTokenData);
+        }
       }
     );
 
     // Add the stored tokens
-    await this.authProvider.addUserForToken(tokenData, ["chat"]);
+    await this.authProvider.addUserForToken(this.tokenData, ["chat"]);
 
     // Create chat client
     this.chatClient = new ChatClient({
       authProvider: this.authProvider,
-      channels: [process.env.TWITCH_CHANNEL_NAME!], // Will be set when connecting to channels
+      channels: [], // Channels will be joined explicitly
     });
 
     // Set up event handlers
@@ -109,24 +117,8 @@ export class TwitchChatBot {
     await this.chatClient.say(channel, message);
   }
 
-  private async loadTokenData(): Promise<TokenData> {
-    try {
-      const tokenFileContent = await fs.readFile(this.tokenFilePath, "utf-8");
-      return JSON.parse(tokenFileContent);
-    } catch (error) {
-      throw new Error(`Failed to load token data: ${error}`);
-    }
-  }
-
-  private async saveTokenData(tokenData: TokenData): Promise<void> {
-    try {
-      await fs.writeFile(
-        this.tokenFilePath,
-        JSON.stringify(tokenData, null, 2)
-      );
-    } catch (error) {
-      console.error("Failed to save token data:", error);
-    }
+  getCurrentTokenData(): TokenData {
+    return { ...this.tokenData };
   }
 
   onMessage(

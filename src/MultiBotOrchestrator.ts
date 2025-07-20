@@ -1,37 +1,9 @@
-import { readFile, writeFile } from "fs/promises";
-import { existsSync } from "fs";
-import { TwitchChatBot } from "./services/chatbot.service";
 import { EventSubService } from "./services/eventsub.service";
 import { StreamService } from "./services/stream.service";
-import {
-  AIService,
-  BOT_PERSONALITIES,
-  BotName,
-  BotPersonality,
-} from "./services/ai.service";
-
-interface TokenData {
-  accessToken: string;
-  refreshToken: string;
-  accessTokenExpiresAt: string;
-  savedAt: string;
-  scope: string[];
-  userId?: string;
-  channelName?: string;
-}
-
-interface TokenStorage {
-  channel?: TokenData;
-  bots: Record<BotName, TokenData>;
-}
-
-interface BotInstance {
-  name: BotName;
-  client: TwitchChatBot;
-  personality: BotPersonality;
-  lastMessageTime: Date;
-  messageCount: number;
-}
+import { AIService, BOT_PERSONALITIES, BotName } from "./services/ai.service";
+import { TokenManager } from "./services/token.service";
+import { ConversationManager } from "./services/conversation.service";
+import { BotManager } from "./services/bot-manager.service";
 
 interface ConversationState {
   isActive: boolean;
@@ -41,10 +13,12 @@ interface ConversationState {
 }
 
 export class MultiBotOrchestrator {
-  private bots: Map<string, BotInstance> = new Map();
   private eventSubService?: EventSubService;
   private streamService?: StreamService;
   private aiService: AIService;
+  private tokenManager: TokenManager;
+  private conversationManager: ConversationManager;
+  private botManager: BotManager;
   private channelUserId: string;
   private channelName: string;
   private isStreamOnline = false;
@@ -67,14 +41,22 @@ export class MultiBotOrchestrator {
     this.channelUserId = process.env.TWITCH_CHANNEL_ID!;
     this.channelName = process.env.TWITCH_CHANNEL_NAME!;
 
-    this.aiService = new AIService();
+    // Initialize managers
+    this.tokenManager = new TokenManager();
+    this.conversationManager = new ConversationManager();
+    this.aiService = new AIService(this.conversationManager);
+    this.botManager = new BotManager({
+      clientId: process.env.TWITCH_CLIENT_ID!,
+      clientSecret: process.env.TWITCH_CLIENT_SECRET!,
+      tokenManager: this.tokenManager,
+    });
   }
 
   async start() {
     console.log("🚀 Starting MultiBotOrchestrator...");
 
     // Load tokens
-    const tokens = await this.loadTokens();
+    const tokens = await this.tokenManager.loadTokens();
 
     if (!tokens.channel) {
       console.error(
@@ -97,7 +79,10 @@ export class MultiBotOrchestrator {
     await this.initializeEventSub(tokens.channel);
 
     // Initialize all bot clients
-    await this.initializeBots(tokens.bots);
+    await this.botManager.initializeAllBots(BOT_PERSONALITIES);
+
+    // Set up message handlers for all bots
+    this.setupBotMessageHandlers();
 
     // Check if stream is currently online
     await this.checkStreamStatus();
@@ -105,26 +90,25 @@ export class MultiBotOrchestrator {
     console.log("✅ MultiBotOrchestrator started successfully");
   }
 
-  private async loadTokens(): Promise<TokenStorage> {
-    const TOKEN_FILE = "./tokens.json";
-
-    if (!existsSync(TOKEN_FILE)) {
-      throw new Error("tokens.json not found");
-    }
-
-    const data = await readFile(TOKEN_FILE, "utf-8");
-    return JSON.parse(data);
-  }
-
-  private async initializeEventSub(channelToken: TokenData) {
+  private async initializeEventSub(channelToken: any) {
     console.log("📡 Initializing EventSub service...");
 
     // Create EventSub service
     this.eventSubService = new EventSubService(
       process.env.TWITCH_CLIENT_ID!,
       process.env.TWITCH_CLIENT_SECRET!,
-      this.channelUserId,
-      "./tokens.json"
+      this.channelUserId
+    );
+
+    // Set up token refresh callback
+    this.eventSubService.setTokenRefreshCallback(
+      async (userId, newTokenData) => {
+        const updatedToken = this.tokenManager.convertAccessToken(
+          newTokenData,
+          userId
+        );
+        await this.tokenManager.updateChannelToken(updatedToken);
+      }
     );
 
     // Initialize with callbacks
@@ -134,14 +118,14 @@ export class MultiBotOrchestrator {
           `🟢 Stream went online! ${event.broadcasterDisplayName} is now live!`
         );
         this.isStreamOnline = true;
-        await this.connectAllBots();
+        await this.botManager.connectAllBots(this.channelName, true);
       },
       onStreamOffline: async (event) => {
         console.log(
           `🔴 Stream went offline! ${event.broadcasterDisplayName} has ended the stream.`
         );
         this.isStreamOnline = false;
-        await this.disconnectAllBots();
+        await this.botManager.disconnectAllBots(this.channelName);
       },
     });
   }
@@ -157,7 +141,7 @@ export class MultiBotOrchestrator {
     if (isOnline) {
       this.isStreamOnline = true;
       console.log("🎮 Stream is already online! Connecting bots...");
-      await this.connectAllBots();
+      await this.botManager.connectAllBots(this.channelName, true);
     } else {
       console.log(
         "⏳ Stream is offline. Bots will connect when stream goes online."
@@ -165,117 +149,51 @@ export class MultiBotOrchestrator {
     }
   }
 
-  private async initializeBots(botsTokens: Record<BotName, TokenData>) {
-    const botCount = Object.keys(botsTokens).length;
-    console.log(`🤖 Initializing ${botCount} bot(s)...`);
+  private setupBotMessageHandlers() {
+    const botNames = this.botManager.getBotNames();
 
-    // Get available personalities
-    const personalities = Object.values(BOT_PERSONALITIES);
-    let personalityIndex = 0;
+    for (const botName of botNames) {
+      this.botManager.setMessageHandler(
+        botName,
+        async (channel: string, user: string, message: string, msg: any) => {
+          // Don't process messages from bots themselves
+          if (this.botManager.isBotUsername(user)) {
+            return;
+          }
 
-    // For single bot, use a more versatile personality
-    const singleBotPersonality = BOT_PERSONALITIES["stickyman1776"];
+          console.log(`[${channel}] ${user}: ${message}`);
 
-    // Initialize each bot with a different personality
-    for (const [botName, tokenData] of Object.entries(botsTokens) as [
-      BotName,
-      TokenData
-    ][]) {
-      // Create a temporary token file for the bot
-      const botTokenPath = `./bot-${botName}-token.json`;
-      await this.saveBotToken(botTokenPath, tokenData);
+          // Update conversation state
+          this.conversationState.lastMessageTime = new Date();
+          this.conversationState.messagesSinceLastBotResponse++;
 
-      // Initialize the TwitchChatBot
-      const chatClient = new TwitchChatBot(
-        process.env.TWITCH_CLIENT_ID!,
-        process.env.TWITCH_CLIENT_SECRET!,
-        botTokenPath
-      );
+          // Analyze the message for triggers
+          const analysis = this.aiService.analyzeMessageTriggers(
+            message,
+            botNames as BotName[]
+          );
 
-      await chatClient.initialize();
+          // Determine which bot(s) should respond
+          const respondingBots = await this.determineRespondingBots(analysis);
 
-      // Assign personality based on bot count
-      const personality =
-        botCount === 1
-          ? singleBotPersonality
-          : personalities[personalityIndex % personalities.length];
-
-      if (botCount > 1) {
-        personalityIndex++;
-      }
-
-      // Create bot instance
-      const botInstance: BotInstance = {
-        name: botName,
-        client: chatClient,
-        personality,
-        lastMessageTime: new Date(0), // Initialize to epoch
-        messageCount: 0,
-      };
-
-      this.bots.set(botName, botInstance);
-
-      // Set up message handler for this bot
-      this.setupBotMessageHandler(botInstance);
-
-      console.log(
-        `✅ Bot '${botName}' initialized with personality: ${personality.name}`
+          // Schedule bot responses with natural delays
+          for (const respondingBotName of respondingBots) {
+            const delay = this.calculateResponseDelay(
+              respondingBots.indexOf(respondingBotName)
+            );
+            setTimeout(() => {
+              this.generateAndSendBotResponse(respondingBotName, message, user);
+            }, delay);
+          }
+        }
       );
     }
   }
 
-  private async saveBotToken(path: string, tokenData: TokenData) {
-    const botTokenFormat = {
-      accessToken: tokenData.accessToken,
-      refreshToken: tokenData.refreshToken,
-      expiresIn: 0, // Will be refreshed
-      obtainmentTimestamp: Date.now(),
-    };
-
-    await writeFile(path, JSON.stringify(botTokenFormat, null, 2));
-  }
-
-  private setupBotMessageHandler(bot: BotInstance) {
-    bot.client.onMessage(
-      async (channel: string, user: string, message: string, msg: any) => {
-        // Don't process messages from bots themselves
-        if (this.isBotUsername(user)) {
-          return;
-        }
-
-        console.log(`[${channel}] ${user}: ${message}`);
-
-        // Update conversation state
-        this.conversationState.lastMessageTime = new Date();
-        this.conversationState.messagesSinceLastBotResponse++;
-
-        // Analyze the message for triggers
-        const botNames = Array.from(this.bots.keys()) as BotName[];
-        const analysis = this.aiService.analyzeMessageTriggers(
-          message,
-          botNames
-        );
-
-        // Determine which bot(s) should respond
-        const respondingBots = await this.determineRespondingBots(analysis);
-
-        // Schedule bot responses with natural delays
-        for (const botName of respondingBots) {
-          const delay = this.calculateResponseDelay(
-            respondingBots.indexOf(botName)
-          );
-          setTimeout(() => {
-            this.generateAndSendBotResponse(botName as BotName, message, user);
-          }, delay);
-        }
-      }
-    );
-  }
-
   private async determineRespondingBots(
     analysis: ReturnType<AIService["analyzeMessageTriggers"]>
-  ): Promise<string[]> {
-    const respondingBots: string[] = [];
+  ): Promise<BotName[]> {
+    const respondingBots: BotName[] = [];
 
     // If specific bots are mentioned, they should respond
     if (analysis.mentionedBots.length > 0) {
@@ -299,15 +217,15 @@ export class MultiBotOrchestrator {
     triggerMessage: string,
     triggerUser: string
   ) {
-    const bot = this.bots.get(botName);
+    const bot = this.botManager.getBot(botName);
 
     if (!bot || !this.isStreamOnline) return;
 
     try {
       // Get list of other bots for context
-      const otherBots = Array.from(this.bots.keys()).filter(
-        (name) => name !== botName
-      ) as BotName[];
+      const otherBots = this.botManager
+        .getBotNames()
+        .filter((name) => name !== botName) as BotName[];
 
       // Generate AI response
       const response = await this.aiService.generateResponse({
@@ -323,8 +241,7 @@ export class MultiBotOrchestrator {
         await bot.client.sendMessage(this.channelName, response);
 
         // Update bot state
-        bot.lastMessageTime = new Date();
-        bot.messageCount++;
+        this.botManager.updateBotState(botName);
         this.conversationState.messagesSinceLastBotResponse = 0;
         this.conversationState.currentSpeaker = botName;
 
@@ -335,76 +252,25 @@ export class MultiBotOrchestrator {
     }
   }
 
-  private isBotUsername(username: string): boolean {
-    return Array.from(this.bots.keys()).some(
-      (botName) => botName.toLowerCase() === username.toLowerCase()
-    );
-  }
-
-  private async connectAllBots() {
-    const botCount = this.bots.size;
-    console.log(
-      `🔌 Connecting ${botCount === 1 ? "bot" : "all bots"} to chat...`
-    );
-
-    let botIndex = 0;
-    for (const [botName, bot] of this.bots.entries()) {
-      try {
-        await bot.client.connect();
-        await bot.client.joinChannel(this.channelName);
-        console.log(`✅ ${botName} connected to channel #${this.channelName}`);
-
-        // Stagger greeting messages (only if stream is online)
-        if (this.isStreamOnline) {
-          setTimeout(async () => {
-            const greetings = [
-              "Hey chat! Ready for some fun? 👋",
-              "What's up everyone! Let's goooo! 🎮",
-              "Hello friends! Excited to be here! ✨",
-              "Yo chat! How's everyone doing? 😄",
-              "Greetings! Let's make this stream awesome! 🚀",
-            ];
-
-            const greeting =
-              greetings[Math.floor(Math.random() * greetings.length)];
-            await bot.client.sendMessage(this.channelName, greeting);
-          }, 2000 + botIndex * 3000); // Stagger by 3 seconds per bot
-        }
-
-        botIndex++;
-      } catch (error) {
-        console.error(`❌ Failed to connect ${botName}:`, error);
-      }
-    }
-  }
-
-  private async disconnectAllBots() {
-    console.log("🔌 Disconnecting all bots from chat...");
-
-    for (const [botName, bot] of this.bots.entries()) {
-      try {
-        await bot.client.leaveChannel(this.channelName);
-        await bot.client.disconnect();
-        console.log(`✅ ${botName} disconnected from chat`);
-      } catch (error) {
-        console.error(`❌ Failed to disconnect ${botName}:`, error);
-      }
-    }
-  }
-
   async stop() {
     console.log("🛑 Stopping MultiBotOrchestrator...");
 
     // Disconnect all bots
-    await this.disconnectAllBots();
+    await this.botManager.disconnectAllBots(this.channelName);
 
     // Stop EventSub service
     if (this.eventSubService) {
       await this.eventSubService.stop();
     }
 
-    // Clear AI service context
-    this.aiService.clearContext(this.channelName);
+    // Clear conversation context
+    this.conversationManager.clearContext(this.channelName);
+
+    // Stop conversation manager cleanup
+    this.conversationManager.stop();
+
+    // Clean up bot resources
+    await this.botManager.cleanup();
 
     console.log("✅ MultiBotOrchestrator stopped");
   }

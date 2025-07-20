@@ -45,10 +45,14 @@ export class StreamService {
 
   async isStreamOnline(): Promise<boolean> {
     try {
-      console.log(`🔍 Checking if ${this.channelName} is currently streaming...`);
-      
-      const stream = await this.apiClient.streams.getStreamByUserName(this.channelName);
-      
+      console.log(
+        `🔍 Checking if ${this.channelName} is currently streaming...`
+      );
+
+      const stream = await this.apiClient.streams.getStreamByUserName(
+        this.channelName
+      );
+
       if (stream) {
         console.log(`🟢 Stream is ONLINE! Title: "${stream.title}"`);
         console.log(`   Game: ${stream.gameName}`);
@@ -66,7 +70,9 @@ export class StreamService {
 
   async getStreamInfo() {
     try {
-      const stream = await this.apiClient.streams.getStreamByUserName(this.channelName);
+      const stream = await this.apiClient.streams.getStreamByUserName(
+        this.channelName
+      );
       return stream;
     } catch (error) {
       console.error("❌ Error getting stream info:", error);
