@@ -1,5 +1,5 @@
 {
-  "name": "stream",
+  "name": "lonely-chat",
   "scripts": {
     "dev": "dotenv -e .env -- bun run --hot src/index.ts",
     "dev:no-hot": "dotenv -e .env -- bun run src/index.ts",
