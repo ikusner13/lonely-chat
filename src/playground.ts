@@ -1,6 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
-import { Effect, pipe } from "effect";
 // import { env } from '@/env';
 
 // ========================================
@@ -33,7 +32,6 @@ const TEMPERATURE = 0.8; // 0 = deterministic, 2 = very random
 const MAX_TOKENS = 200;
 
 const TIMEOUT_SECONDS = 30; // Timeout after 30 seconds
-// const TIMEOUT_SECONDS = 0.1; // Uncomment to test timeout behavior
 
 // ========================================
 // TEST MESSAGE - Change this to test different inputs
@@ -64,36 +62,29 @@ async function playground() {
 
   const startTime = Date.now();
 
-  // Create an Effect that wraps the generateText call
-  const generateTextEffect = Effect.tryPromise({
-    try: () =>
-      generateText({
-        model: openrouter.chat(MODEL),
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: "user",
-            content: TEST_MESSAGE,
-          },
-        ],
-        temperature: TEMPERATURE,
-        maxOutputTokens: MAX_TOKENS,
-        maxRetries: 0,
-      }),
-    catch: (error) => new Error(`GenerateText failed: ${error}`),
-  });
+  const abortController = new AbortController();
 
-  // Apply timeout and error handling
-  const program = pipe(
-    generateTextEffect,
-    Effect.timeout(`${TIMEOUT_SECONDS} seconds`),
-    Effect.catchTag("TimeoutException", () =>
-      Effect.fail(new Error(`Request timed out after ${TIMEOUT_SECONDS} seconds`))
-    )
-  );
+  const timeoutId = setTimeout(() => {
+    abortController.abort();
+  }, TIMEOUT_SECONDS * 1000);
 
   try {
-    const result = await Effect.runPromise(program);
+    const result = await generateText({
+      model: openrouter.chat(MODEL),
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: TEST_MESSAGE,
+        },
+      ],
+      temperature: TEMPERATURE,
+      maxOutputTokens: MAX_TOKENS,
+      maxRetries: 0,
+      abortSignal: abortController.signal,
+    });
+
+    clearTimeout(timeoutId);
 
     const endTime = Date.now();
     const duration = (endTime - startTime) / 1000;
@@ -117,6 +108,8 @@ async function playground() {
     if (error instanceof Error) {
       console.error("Message:", error.message);
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
