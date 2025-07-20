@@ -1,4 +1,4 @@
-import type { AccessToken } from "@twurple/auth";
+import type { AccessToken } from '@twurple/auth';
 
 export interface TokenData {
   accessToken: string;
@@ -27,7 +27,7 @@ export class TokenManager {
   private tokenCache: TokenStorage | null = null;
   private botTokenPaths: Map<string, string> = new Map();
 
-  constructor(mainTokenPath = "./tokens.json") {
+  constructor(mainTokenPath = './tokens.json') {
     this.mainTokenPath = mainTokenPath;
   }
 
@@ -91,7 +91,7 @@ export class TokenManager {
       await this.loadTokens();
     }
 
-    if (this.tokenCache && this.tokenCache.channel) {
+    if (this.tokenCache?.channel) {
       this.tokenCache.channel = {
         ...this.tokenCache.channel,
         ...updatedToken,
@@ -109,7 +109,7 @@ export class TokenManager {
       await this.loadTokens();
     }
 
-    if (this.tokenCache && this.tokenCache.bots[botName]) {
+    if (this.tokenCache?.bots[botName]) {
       this.tokenCache.bots[botName] = {
         ...this.tokenCache.bots[botName],
         ...updatedToken,
@@ -123,7 +123,7 @@ export class TokenManager {
   convertAccessToken(token: AccessToken, userId?: string): Partial<TokenData> {
     return {
       accessToken: token.accessToken,
-      refreshToken: token.refreshToken || "",
+      refreshToken: token.refreshToken || '',
       accessTokenExpiresAt: token.expiresIn
         ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
         : new Date(Date.now() + 3600 * 1000).toISOString(),
@@ -142,6 +142,7 @@ export class TokenManager {
     for (const [botName, path] of this.botTokenPaths) {
       try {
         const file = Bun.file(path);
+        // biome-ignore lint/nursery/noAwaitInLoop: fine
         if (await file.exists()) {
           await file.delete();
           console.log(`🗑️ Cleaned up token file for ${botName}`);

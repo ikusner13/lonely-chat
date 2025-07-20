@@ -1,14 +1,16 @@
-import { Hono } from "hono";
-import { Twitch } from "arctic";
-import { writeFile, readFile } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync } from 'node:fs';
+
+import { readFile, writeFile } from 'node:fs/promises';
+import { Twitch } from 'arctic';
+import { Hono } from 'hono';
+import { env } from '@/env';
 
 // Parse command line arguments
-const args = Bun.argv.slice(2);
+const args = process.argv.slice(2);
 if (args.length < 1) {
-  console.error("Usage: bun run generate-tokens.ts <bot-name>");
-  console.error("Example:");
-  console.error("  bun run generate-tokens.ts mybot1");
+  console.error('Usage: bun run generate-tokens.ts <bot-name>');
+  console.error('Example:');
+  console.error('  bun run generate-tokens.ts mybot1');
   process.exit(1);
 }
 
@@ -16,16 +18,15 @@ const botName = args[0];
 
 // Initialize Arctic Twitch provider
 const twitch = new Twitch(
-  process.env.TWITCH_CLIENT_ID!,
-  process.env.TWITCH_CLIENT_SECRET!,
-  process.env.TWITCH_REDIRECT_URI ||
-    "https://0wvvnjxz-8080.use.devtunnels.ms/callback"
+  env.TWITCH_CLIENT_ID,
+  env.TWITCH_CLIENT_SECRET,
+  env.TWITCH_REDIRECT_URI || 'https://0wvvnjxz-8080.use.devtunnels.ms/callback'
 );
 
 const app = new Hono();
 
 // Token storage path
-const TOKEN_FILE = "./tokens.json";
+const TOKEN_FILE = './tokens.json';
 
 interface TokenData {
   accessToken: string;
@@ -44,7 +45,7 @@ interface TokenStorage {
 // Helper function to load tokens
 async function loadTokens(): Promise<TokenStorage> {
   if (existsSync(TOKEN_FILE)) {
-    const data = await readFile(TOKEN_FILE, "utf-8");
+    const data = await readFile(TOKEN_FILE, 'utf-8');
     return JSON.parse(data);
   }
   return { bots: {} };
@@ -56,27 +57,27 @@ async function saveTokens(storage: TokenStorage) {
 }
 
 // Login route to initiate OAuth flow
-app.get("/login", async (c) => {
+app.get('/login', (c) => {
   const state = crypto.randomUUID();
 
   // Bot scopes for chat functionality
-  const scopes = ["chat:read", "chat:edit"];
+  const scopes = ['chat:read', 'chat:edit'];
 
   const url = twitch.createAuthorizationURL(state, scopes);
 
   console.log(`\nGenerating tokens for bot: ${botName}`);
-  console.log(`Requested scopes: ${scopes.join(", ")}`);
-  console.log("\nOpening browser for authentication...");
+  console.log(`Requested scopes: ${scopes.join(', ')}`);
+  console.log('\nOpening browser for authentication...');
 
   return c.redirect(url.toString());
 });
 
 // Callback endpoint for Twitch OAuth
-app.get("/callback", async (c) => {
-  const code = c.req.query("code");
+app.get('/callback', async (c) => {
+  const code = c.req.query('code');
 
   if (!code) {
-    return c.text("Error: No authorization code received", 400);
+    return c.text('Error: No authorization code received', 400);
   }
 
   try {
@@ -92,7 +93,7 @@ app.get("/callback", async (c) => {
       refreshToken: tokens.refreshToken(),
       accessTokenExpiresAt: tokens.accessTokenExpiresAt().toISOString(),
       savedAt: new Date().toISOString(),
-      // @ts-ignore scope is there
+      // @ts-expect-error scope is there
       scope: tokens.data.scope as string[],
     };
 
@@ -104,7 +105,7 @@ app.get("/callback", async (c) => {
     const successMessage = `Bot '${botName}' tokens saved successfully!`;
 
     console.log(`\n✅ ${successMessage}`);
-    console.log("Tokens saved to tokens.json");
+    console.log('Tokens saved to tokens.json');
 
     // Return success page
     return c.html(`
@@ -122,13 +123,13 @@ app.get("/callback", async (c) => {
       </html>
     `);
   } catch (error) {
-    console.error("OAuth error:", error);
-    return c.text("Error during authentication", 500);
+    console.error('OAuth error:', error);
+    return c.text('Error during authentication', 500);
   }
 });
 
 // Root endpoint
-app.get("/", (c) => {
+app.get('/', (c) => {
   const title = `Twitch Bot OAuth - ${botName}`;
 
   return c.html(`
@@ -150,8 +151,8 @@ app.get("/", (c) => {
 });
 
 // Start server
-console.log(`Starting OAuth server on http://localhost:8080`);
-console.log(`Navigate to http://localhost:8080 to begin authentication`);
+console.log('Starting OAuth server on http://localhost:8080');
+console.log('Navigate to http://localhost:8080 to begin authentication');
 
 export default {
   port: 8080,

@@ -1,22 +1,16 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, ModelMessage } from "ai";
-import { ConversationManager, ChatMessage } from "./conversation.service";
-
-// Bot personality configuration
-export interface BotPersonality {
-  name: string;
-  model: string;
-  systemPrompt: string;
-  temperature?: number;
-  maxTokens?: number;
-}
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { generateText, type ModelMessage } from 'ai';
+import { type BotName, getBotPersonality } from '@/config/bot.schema';
+import { env } from '@/env';
+import type { ChatMessage, ConversationManager } from './conversation.service';
+import '@/config/bots';
 
 export class AIService {
   private openrouter;
   private conversationManager: ConversationManager;
 
   constructor(conversationManager: ConversationManager) {
-    this.openrouter = createOpenRouter();
+    this.openrouter = createOpenRouter({ apiKey: env.OPENROUTER_KEY });
     this.conversationManager = conversationManager;
   }
 
@@ -55,19 +49,19 @@ export class AIService {
       // Convert messages to AI SDK format
       const aiMessages = this.convertToAIMessages(messages);
 
-      const personality = BOT_PERSONALITIES[botName];
+      const personality = getBotPersonality(botName);
 
       // Debug logging
-      console.log("Personality:", personality);
-      console.log("Model:", personality.model);
+      console.log('Personality:', personality);
+      console.log('Model:', personality.model);
 
       // Generate response using the AI model
       const result = await generateText({
         model: this.openrouter.chat(personality.model),
         system: this.buildSystemPrompt(botName, otherBots),
         messages: aiMessages,
-        temperature: personality.temperature || 0.7,
-        maxOutputTokens: personality.maxTokens || 150,
+        temperature: personality.temperature,
+        maxOutputTokens: personality.maxTokens,
       });
 
       // Add the bot's response to conversation
@@ -116,14 +110,17 @@ export class AIService {
    * Build system prompt that includes awareness of other bots
    */
   private buildSystemPrompt(botName: BotName, otherBots: BotName[]): string {
-    let prompt = BOT_PERSONALITIES[botName].systemPrompt;
+    const personality = getBotPersonality(botName);
+    let prompt = personality.systemPrompt;
 
     if (otherBots.length > 0) {
       prompt += `\n\nYou are ${botName}. You're chatting alongside these other bots: ${otherBots.join(
-        ", "
+        ', '
       )}. `;
-      prompt += `You can interact with them naturally, respond to their messages, and have conversations with them. `;
-      prompt += `Remember each bot has their own personality - engage with them as you would with real people in chat.`;
+      prompt +=
+        'You can interact with them naturally, respond to their messages, and have conversations with them. ';
+      prompt +=
+        'Remember each bot has their own personality - engage with them as you would with real people in chat.';
     } else {
       prompt += `\n\nYou are ${botName}.`;
     }
@@ -143,15 +140,3 @@ export class AIService {
     });
   }
 }
-
-export type BotName = "stickyman1776";
-
-export const BOT_PERSONALITIES: Record<BotName, BotPersonality> = {
-  stickyman1776: {
-    name: "Stickyman1776",
-    model: "moonshotai/kimi-k2:free",
-    systemPrompt: `You are the ultimate positive supporter in chat! You're always encouraging, celebrating wins, and keeping morale high. You use lots of hype emotes and positive language. You're genuinely enthusiastic about everything and love to cheer for both the streamer and other chatters.`,
-    temperature: 0.8,
-    maxTokens: 100,
-  },
-};

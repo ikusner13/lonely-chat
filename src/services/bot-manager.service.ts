@@ -1,7 +1,7 @@
-import { TwitchChatBot } from "./chatbot.service";
-import { TokenManager } from "./token.service";
-import type { BotPersonality } from "./ai.service";
-import type { ChatMessage } from "@twurple/chat";
+import type { ChatMessage } from '@twurple/chat';
+import type { BotPersonality } from '@/config/bot.schema';
+import { TwitchChatBot } from './chatbot.service';
+import type { TokenManager } from './token.service';
 
 export interface BotInstance {
   name: string;
@@ -50,24 +50,23 @@ export class BotManager {
 
     // Get available personalities
     const personalityList = Object.values(personalities);
-    let personalityIndex = 0;
 
     // For single bot, use the first personality
     const singleBotPersonality = personalityList[0];
 
-    for (const botName of Object.keys(botTokens)) {
+    // Create initialization promises for all bots
+    const initPromises = Object.keys(botTokens).map((botName, index) => {
       // Assign personality based on bot count
       const personality =
         botCount === 1
           ? singleBotPersonality
-          : personalityList[personalityIndex % personalityList.length];
+          : personalityList[index % personalityList.length];
 
-      if (botCount > 1) {
-        personalityIndex++;
-      }
+      return this.initializeBot(botName, personality);
+    });
 
-      await this.initializeBot(botName, personality);
-    }
+    // Initialize all bots in parallel
+    await Promise.all(initPromises);
   }
 
   /**
@@ -179,30 +178,30 @@ export class BotManager {
   /**
    * Connect all bots to a channel
    */
-  async connectAllBots(
-    channelName: string,
-    isStreamOnline: boolean
-  ): Promise<void> {
+  connectAllBots(channelName: string, isStreamOnline: boolean): void {
     const botCount = this.bots.size;
     console.log(
-      `🔌 Connecting ${botCount === 1 ? "bot" : "all bots"} to chat...`
+      `🔌 Connecting ${botCount === 1 ? 'bot' : 'all bots'} to chat...`
     );
 
     let botIndex = 0;
     for (const [botName, bot] of this.bots.entries()) {
       try {
-        await bot.client.connect();
-        await bot.client.joinChannel(channelName);
+        bot.client.connect();
+        bot.client.joinChannel(channelName);
         console.log(`✅ ${botName} connected to channel #${channelName}`);
 
         // Stagger greeting messages (only if stream is online)
         if (isStreamOnline) {
-          setTimeout(async () => {
-            const greetings = this.getGreetings();
-            const greeting =
-              greetings[Math.floor(Math.random() * greetings.length)];
-            await bot.client.sendMessage(channelName, greeting);
-          }, 2000 + botIndex * 3000); // Stagger by 3 seconds per bot
+          setTimeout(
+            async () => {
+              const greetings = this.getGreetings();
+              const greeting =
+                greetings[Math.floor(Math.random() * greetings.length)];
+              await bot.client.sendMessage(channelName, greeting);
+            },
+            2000 + botIndex * 3000
+          ); // Stagger by 3 seconds per bot
         }
 
         botIndex++;
@@ -215,13 +214,13 @@ export class BotManager {
   /**
    * Disconnect all bots from a channel
    */
-  async disconnectAllBots(channelName: string): Promise<void> {
-    console.log("🔌 Disconnecting all bots from chat...");
+  disconnectAllBots(channelName: string): void {
+    console.log('🔌 Disconnecting all bots from chat...');
 
     for (const [botName, bot] of this.bots.entries()) {
       try {
-        await bot.client.leaveChannel(channelName);
-        await bot.client.disconnect();
+        bot.client.leaveChannel(channelName);
+        bot.client.disconnect();
         console.log(`✅ ${botName} disconnected from chat`);
       } catch (error) {
         console.error(`❌ Failed to disconnect ${botName}:`, error);
@@ -249,7 +248,9 @@ export class BotManager {
     personality: string;
   } | null {
     const bot = this.bots.get(botName);
-    if (!bot) return null;
+    if (!bot) {
+      return null;
+    }
 
     return {
       lastMessageTime: bot.lastMessageTime,
@@ -265,7 +266,7 @@ export class BotManager {
     // Disconnect all bots
     for (const bot of this.bots.values()) {
       try {
-        await bot.client.disconnect();
+        bot.client.disconnect();
       } catch (error) {
         console.error(`Error disconnecting bot ${bot.name}:`, error);
       }
@@ -284,9 +285,9 @@ export class BotManager {
    */
   private getGreetings(): string[] {
     return [
-      "Hey chat! Ready for some fun? 👋",
+      'Hey chat! Ready for some fun? 👋',
       "What's up everyone! Let's goooo! 🎮",
-      "Hello friends! Excited to be here! ✨",
+      'Hello friends! Excited to be here! ✨',
       "Yo chat! How's everyone doing? 😄",
       "Greetings! Let's make this stream awesome! 🚀",
     ];

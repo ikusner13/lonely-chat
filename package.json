@@ -1,26 +1,32 @@
 {
   "name": "lonely-chat",
   "scripts": {
-    "dev": "dotenv -e .env -- bun run --hot src/index.ts",
-    "dev:no-hot": "dotenv -e .env -- bun run src/index.ts",
+    "dev:hot": "dotenv -e .env -- bun run --hot src/index.ts",
+    "dev": "dotenv -e .env -- bun run src/index.ts",
     "generate-token": "dotenv -e .env -- bun run src/scripts/generate-tokens.ts",
     "generate-channel-token": "dotenv -e .env -- bun run src/scripts/generate-channel-token.ts",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "lint": "npx ultracite lint",
+    "format": "npx ultracite format"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.0.0-beta.2",
+    "@t3-oss/env-core": "^0.13.8",
     "@twurple/api": "^7.3.0",
     "@twurple/auth": "^7.3.0",
     "@twurple/chat": "^7.3.0",
     "@twurple/eventsub-ws": "^7.3.0",
     "ai": "5.0.0-beta.10",
     "arctic": "^3.7.0",
-    "hono": "^4.8.5"
+    "hono": "^4.8.5",
+    "zod": "^4.0.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.1.2",
     "@types/bun": "latest",
+    "dotenv-cli": "^8.0.0",
     "typescript": "^5.8.3",
-    "dotenv-cli": "^8.0.0"
+    "ultracite": "5.0.46"
   },
   "packageManager": "bun@1.2.19"
 }
