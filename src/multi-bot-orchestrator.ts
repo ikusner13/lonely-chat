@@ -1,9 +1,6 @@
 import { env } from '@/env';
-import {
-  AIService,
-  BOT_PERSONALITIES,
-  type BotName,
-} from './services/ai.service';
+import { type BotName, getBotConfig } from './config/bot.schema';
+import { AIService } from './services/ai.service';
 import { BotManager } from './services/bot-manager.service';
 import { ConversationManager } from './services/conversation.service';
 import { EventSubService } from './services/eventsub.service';
@@ -83,7 +80,7 @@ export class MultiBotOrchestrator {
     await this.initializeEventSub(tokens.channel);
 
     // Initialize all bot clients
-    await this.botManager.initializeAllBots(BOT_PERSONALITIES);
+    await this.botManager.initializeAllBots(getBotConfig());
 
     // Set up message handlers for all bots
     this.setupBotMessageHandlers();

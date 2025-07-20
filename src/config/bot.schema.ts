@@ -1,14 +1,9 @@
 import { z } from 'zod';
 
-// AI model schema with literal values
 export const AIModelSchema = z
-  .enum([
-    'moonshotai/kimi-k2:free',
-    'meta-llama/llama-3.1-70b-instruct:free',
-    'google/gemini-1.5-flash',
-    'openai/gpt-4o-mini',
-    'anthropic/claude-3.5-sonnet',
-  ])
+  .enum(['moonshotai/kimi-k2:free'], {
+    error: 'Invalid model. Must be one of: moonshotai/kimi-k2:free',
+  })
   .describe('Available AI models from OpenRouter')
   .meta({
     id: 'AIModel',
@@ -18,9 +13,10 @@ export const AIModelSchema = z
 
 export type AIModel = z.infer<typeof AIModelSchema>;
 
-// Bot name schema
 export const BotNameSchema = z
-  .enum(['stickyman1776'])
+  .enum(['stickyman1776'], {
+    error: 'Invalid bot name. Currently supported: stickyman1776',
+  })
   .describe('Unique identifier for a bot instance')
   .meta({
     id: 'BotName',
@@ -30,23 +26,28 @@ export const BotNameSchema = z
 
 export type BotName = z.infer<typeof BotNameSchema>;
 
-// Response chance schema with constraints
 export const ResponseChanceSchema = z
   .object({
     question: z
-      .number()
-      .min(0)
-      .max(1)
+      .number({
+        error: 'Question response chance must be a number',
+      })
+      .min(0, { error: 'Question response chance must be at least 0' })
+      .max(1, { error: 'Question response chance must be at most 1' })
       .describe('Probability (0-1) of responding to questions'),
     greeting: z
-      .number()
-      .min(0)
-      .max(1)
+      .number({
+        error: 'Greeting response chance must be a number',
+      })
+      .min(0, { error: 'Greeting response chance must be at least 0' })
+      .max(1, { error: 'Greeting response chance must be at most 1' })
       .describe('Probability (0-1) of responding to greetings'),
     general: z
-      .number()
-      .min(0)
-      .max(1)
+      .number({
+        error: 'General response chance must be a number',
+      })
+      .min(0, { error: 'General response chance must be at least 0' })
+      .max(1, { error: 'General response chance must be at most 1' })
       .describe('Probability (0-1) of responding to general messages'),
   })
   .describe('Response probability configuration for different message types')
@@ -58,33 +59,45 @@ export const ResponseChanceSchema = z
 
 export type ResponseChance = z.infer<typeof ResponseChanceSchema>;
 
-// Bot personality schema
 export const BotPersonalitySchema = z
   .object({
-    name: z.string().min(1).describe('Display name for the bot'),
+    name: z
+      .string({
+        error: 'Bot name must be a string',
+      })
+      .min(1, { error: 'Bot name cannot be empty' })
+      .describe('Display name for the bot'),
     model: AIModelSchema,
     systemPrompt: z
-      .string()
-      .min(1)
+      .string({
+        error: 'System prompt must be a string',
+      })
+      .min(1, { error: 'System prompt cannot be empty' })
       .describe(
         "System prompt that defines the bot's personality and behavior"
       ),
     temperature: z
-      .number()
-      .min(0)
-      .max(2)
+      .number({
+        error: 'Temperature must be a number',
+      })
+      .min(0, { error: 'Temperature must be at least 0 (deterministic)' })
+      .max(2, { error: 'Temperature must be at most 2 (very random)' })
       .default(0.7)
       .describe(
         'Controls randomness in responses (0=deterministic, 2=very random)'
       ),
     maxTokens: z
-      .int()
-      .positive()
-      .max(4000)
+      .int({
+        error: 'Max tokens must be an integer',
+      })
+      .positive({ error: 'Max tokens must be positive' })
+      .max(4000, { error: 'Max tokens cannot exceed 4000' })
       .default(150)
       .describe('Maximum number of tokens in bot responses'),
     interests: z
-      .array(z.string())
+      .array(z.string(), {
+        error: 'Interests must be an array of strings',
+      })
       .optional()
       .describe('Topics the bot is interested in for conversation targeting'),
     responseChance: ResponseChanceSchema.optional(),
@@ -106,9 +119,10 @@ export const BotPersonalitySchema = z
 
 export type BotPersonality = z.infer<typeof BotPersonalitySchema>;
 
-// Bot configuration schema - ensures all bot names have configs
 export const BotConfigSchema = z
-  .record(BotNameSchema, BotPersonalitySchema)
+  .record(BotNameSchema, BotPersonalitySchema, {
+    error: 'Bot configuration must be an object',
+  })
   .describe(
     'Complete bot configuration mapping bot names to their personalities'
   )
@@ -130,26 +144,56 @@ export const BotConfigSchema = z
 
 export type BotConfig = z.infer<typeof BotConfigSchema>;
 
-// Runtime validation helper
+export interface FormattedError {
+  success: false;
+  error: {
+    formatted: ReturnType<typeof z.treeifyError>;
+    flattened: ReturnType<typeof z.flattenError>;
+    pretty: ReturnType<typeof z.prettifyError>;
+  };
+}
+
+export interface FormattedSuccess<T> {
+  success: true;
+  data: T;
+}
+
+export type ValidationResult<T> = FormattedSuccess<T> | FormattedError;
+
 export const validateBotConfig = (config: unknown): BotConfig => {
   return BotConfigSchema.parse(config);
 };
 
-// Safe bot personality getter with validation
+export const safeValidateBotConfig = (
+  config: unknown
+): ValidationResult<BotConfig> => {
+  const result = BotConfigSchema.safeParse(config);
+
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+
+  return {
+    success: false,
+    error: {
+      formatted: z.treeifyError(result.error),
+      flattened: z.flattenError(result.error),
+      pretty: z.prettifyError(result.error),
+    },
+  };
+};
+
 export const getBotPersonality = (name: string): BotPersonality => {
   const parsed = BotNameSchema.safeParse(name);
   if (!parsed.success) {
-    throw new Error(
-      `Invalid bot name: ${name}. Valid names: ${BotNameSchema.options.join(', ')}`
-    );
+    const pretty = z.prettifyError(parsed.error);
+    throw new Error(`Invalid bot name: ${name}\n${pretty}`);
   }
 
-  // This will be used after loading config
   const config = getBotConfig();
   return config[parsed.data];
 };
 
-// Config loader (to be implemented)
 let cachedConfig: BotConfig | null = null;
 
 export const getBotConfig = (): BotConfig => {
@@ -162,23 +206,27 @@ export const getBotConfig = (): BotConfig => {
 };
 
 export const loadBotConfig = (config: unknown): void => {
-  cachedConfig = validateBotConfig(config);
+  const result = safeValidateBotConfig(config);
+
+  if (!result.success) {
+    console.error('Bot configuration validation failed:');
+    console.error(result.error.pretty);
+    throw new Error(`Invalid bot configuration:\n${result.error.pretty}`);
+  }
+
+  cachedConfig = result.data;
 };
 
-// Export all bot names for iteration
 export const ALL_BOT_NAMES = BotNameSchema.options;
 
-// Helper to get schema metadata
 export const getSchemaMetadata = <T extends z.ZodType>(schema: T) => {
   return schema.meta();
 };
 
-// Generate JSON Schema using Zod's built-in function
 export const generateJsonSchema = () => {
   return z.toJSONSchema(BotConfigSchema);
 };
 
-// Example of generating JSON Schema with metadata
 export const generateJsonSchemaWithMetadata = () => {
   return z.toJSONSchema(BotConfigSchema, {
     metadata: z.globalRegistry,
