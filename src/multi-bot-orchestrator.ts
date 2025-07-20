@@ -77,7 +77,11 @@ export class MultiBotOrchestrator {
     await this.streamService.initialize(tokens.channel);
 
     // Initialize EventSub with user token for channel monitoring
-    await this.initializeEventSub(tokens.channel);
+    if (env.DISABLE_EVENTSUB) {
+      console.log('⚠️ EventSub is disabled via DISABLE_EVENTSUB environment variable');
+    } else {
+      await this.initializeEventSub(tokens.channel);
+    }
 
     // Initialize all bot clients
     await this.botManager.initializeAllBots(getBotConfig());

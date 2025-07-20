@@ -12,6 +12,12 @@ export const env = createEnv({
       .optional()
       .default('https://0wvvnjxz-8080.use.devtunnels.ms/callback'),
     OPENROUTER_KEY: z.string().min(1),
+    DISABLE_EVENTSUB: z
+      .string()
+      // transform to boolean using preferred coercion logic
+      .transform((s) => s !== "false" && s !== "0")
+      .optional()
+      .default(false),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
