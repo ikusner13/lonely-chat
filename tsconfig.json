@@ -16,7 +16,7 @@
       "@/*": ["src/*"],
       "@/env": ["src/env"],
       "@/services/*": ["src/services/*"],
-      "@/scripts/*": ["src/scripts/*"]
+      "@/scripts/*": ["scripts/*"]
     }
   }
 }
