@@ -15,4 +15,8 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
+  onValidationError: (issues) => {
+    console.error('❌ Invalid environment variables:', issues);
+    throw new Error('Invalid environment variables');
+  },
 });

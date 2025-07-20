@@ -1,8 +1,8 @@
 {
   "name": "lonely-chat",
   "scripts": {
-    "dev": "dotenv -e .env -- bun run --hot src/index.ts",
-    "dev:no-hot": "dotenv -e .env -- bun run src/index.ts",
+    "dev:hot": "dotenv -e .env -- bun run --hot src/index.ts",
+    "dev": "dotenv -e .env -- bun run src/index.ts",
     "generate-token": "dotenv -e .env -- bun run src/scripts/generate-tokens.ts",
     "generate-channel-token": "dotenv -e .env -- bun run src/scripts/generate-channel-token.ts",
     "type-check": "tsc --noEmit",
