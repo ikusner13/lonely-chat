@@ -1,5 +1,5 @@
 import type { ChatMessage } from '@twurple/chat';
-import type { BotPersonality } from './ai.service';
+import type { BotPersonality } from '@/config/bot.schema';
 import { TwitchChatBot } from './chatbot.service';
 import type { TokenManager } from './token.service';
 
