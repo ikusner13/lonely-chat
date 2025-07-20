@@ -7,7 +7,8 @@
     "generate-channel-token": "dotenv -e .env -- bun run src/scripts/generate-channel-token.ts",
     "type-check": "tsc --noEmit",
     "lint": "npx ultracite lint",
-    "format": "npx ultracite format"
+    "format": "npx ultracite format",
+    "playground": "bun run scripts/playground.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.0.0-beta.2",
