@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-import { AppBootstrapper } from './app-bootstrapper';
 import type { Application } from './app-bootstrapper';
+import { AppBootstrapper } from './app-bootstrapper';
 
 // Test Phase 3 Integration - Full System Test
 async function testPhase3Integration() {
   console.log('=== Phase 3 Integration Test ===\n');
-  
+
   let app: Application | null = null;
   let allTestsPassed = true;
 
@@ -21,15 +21,15 @@ async function testPhase3Integration() {
     const appServices = app.getServices();
     const expectedServices = [
       'tokenManager',
-      'aiService', 
+      'aiService',
       'conversationManager',
       'streamService',
       'botManager',
       'orchestrator',
       'messageRouter',
-      'streamLifecycleManager'
+      'streamLifecycleManager',
     ];
-    
+
     for (const service of expectedServices) {
       if (!(service in appServices)) {
         throw new Error(`Missing service: ${service}`);
@@ -44,16 +44,21 @@ async function testPhase3Integration() {
 
     // Test 4: Verify stream lifecycle manager is listening for events
     console.log('4. Verifying stream lifecycle manager...');
-    const streamLifecycleEvents = ['stream:online', 'stream:offline', 'bots:connected', 'bots:disconnected'];
+    const streamLifecycleEvents = [
+      'stream:online',
+      'stream:offline',
+      'bots:connected',
+      'bots:disconnected',
+    ];
     let hasListeners = true;
-    
+
     for (const event of streamLifecycleEvents) {
       if (appServices.streamLifecycleManager.listenerCount(event) === 0) {
         hasListeners = false;
         console.error(`❌ No listeners for event: ${event}`);
       }
     }
-    
+
     if (hasListeners) {
       console.log('✅ Stream lifecycle manager properly configured\n');
     } else {
@@ -65,8 +70,8 @@ async function testPhase3Integration() {
     const botNames = appServices.botManager.getBotNames();
     const botCount = botNames.length;
     console.log(`   - Number of bots configured: ${botCount}`);
-    console.log(`   - Bot names: ${botNames.join(', ')}`); 
-    
+    console.log(`   - Bot names: ${botNames.join(', ')}`);
+
     if (botCount > 0) {
       console.log('✅ Bot manager has bots configured\n');
     } else {
@@ -78,18 +83,20 @@ async function testPhase3Integration() {
     const testContext = {
       channel: 'test-channel',
       user: 'test-user',
-      message: 'Hey @friendly, how are you?',
+      message: 'Hey @stickyman1776, how are you?',
       timestamp: new Date(),
       isQuestion: true,
-      mentionedBots: ['friendly' as const]
+      mentionedBots: ['stickyman1776' as const],
     };
 
     // Test orchestrator decision making
     const responses = appServices.orchestrator.determineResponses(testContext);
     console.log(`   - Orchestrator returned ${responses.length} response(s)`);
-    
+
     if (responses.length > 0) {
-      console.log(`   - First response: Bot="${responses[0].botName}", Delay=${responses[0].delay}ms, Priority=${responses[0].priority}`);
+      console.log(
+        `   - First response: Bot="${responses[0].botName}", Delay=${responses[0].delay}ms, Priority=${responses[0].priority}`
+      );
       console.log('✅ Message routing logic working correctly\n');
     } else {
       console.log('⚠️  No responses generated (check bot configuration)\n');
@@ -99,9 +106,8 @@ async function testPhase3Integration() {
     console.log('7. Testing graceful shutdown...');
     await app.shutdown();
     console.log('✅ Application shut down gracefully\n');
-    
-    app = null;
 
+    app = null;
   } catch (error) {
     console.error('❌ Test failed:', error);
     allTestsPassed = false;
@@ -120,7 +126,9 @@ async function testPhase3Integration() {
   console.log('\n=== Test Summary ===');
   if (allTestsPassed) {
     console.log('✅ All Phase 3 integration tests passed!');
-    console.log('\nThe new architecture is successfully integrated and ready for use.');
+    console.log(
+      '\nThe new architecture is successfully integrated and ready for use.'
+    );
     console.log('You can now run "bun run dev" to start the application.\n');
   } else {
     console.log('❌ Some tests failed. Please check the errors above.');

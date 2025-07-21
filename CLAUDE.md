@@ -44,8 +44,11 @@ Currently, no test, lint, or build commands are configured. Bun executes TypeScr
 
 ## Project Structure
 
-- `/src/index.ts` - Main entry point that starts the MultiBotOrchestrator
-- `/src/MultiBotOrchestrator.ts` - Manages multiple bot instances and conversation flow
+- `/src/index.ts` - Main entry point that bootstraps the application
+- `/src/app-bootstrapper.ts` - Initializes all services and wires dependencies
+- `/src/multi-bot-orchestrator-v2.ts` - Pure orchestration logic for bot coordination
+- `/src/services/message-router.service.ts` - Routes messages and schedules bot responses
+- `/src/services/stream-lifecycle-manager.service.ts` - Manages stream state and bot connections
 - `/src/services/ai.service.ts` - AI integration using Vercel AI SDK and OpenRouter
 - `/src/services/chatbot.service.ts` - Twitch chat client wrapper
 - `/src/services/eventsub.service.ts` - Twitch EventSub for stream online/offline events

@@ -68,5 +68,3 @@ The old `MultiBotOrchestrator` has been replaced with:
 - `StreamLifecycleManager` for stream state management
 - `MessageRouter` for message handling
 - `MultiBotOrchestratorV2` for pure orchestration logic
-
-The old file is kept for reference but is no longer used.

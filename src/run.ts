@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
+
 /**
  * Simple run script for the new architecture
  * This provides a clean way to start the application with proper error handling
  */
 
-import { AppBootstrapper } from './app-bootstrapper';
 import type { Application } from './app-bootstrapper';
+import { AppBootstrapper } from './app-bootstrapper';
 
 async function run() {
   let app: Application | null = null;
@@ -26,10 +27,12 @@ async function run() {
     console.log('\nPress Ctrl+C to stop\n');
 
     // Keep the process alive
-    await new Promise(() => {});
+    await new Promise(() => {
+      // Intentionally empty - keeps process running
+    });
   } catch (error) {
     console.error('❌ Failed to start application:', error);
-    
+
     // Attempt cleanup if app was partially initialized
     if (app) {
       try {
@@ -38,7 +41,7 @@ async function run() {
         console.error('❌ Error during emergency shutdown:', shutdownError);
       }
     }
-    
+
     process.exit(1);
   }
 }
