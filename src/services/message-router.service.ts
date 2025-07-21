@@ -59,7 +59,7 @@ export class MessageRouter {
 
     // Create message context
     const botNames = this.botManager.getBotNames() as BotName[];
-    const analysis = this.aiService.analyzeMessageTriggers(message, botNames);
+    const analysis = this.analyzeMessageTriggers(message, botNames);
 
     const context: MessageContext = {
       channel,
@@ -161,5 +161,30 @@ export class MessageRouter {
 
   stop(): void {
     this.clearResponseTimers();
+  }
+
+  private analyzeMessageTriggers(
+    message: string,
+    botNames: BotName[]
+  ): {
+    shouldRespond: boolean;
+    mentionedBots: BotName[];
+  } {
+    const lowerMessage = message.toLowerCase();
+
+    // Check for bot mentions
+    const mentionedBots = botNames.filter((botName) =>
+      lowerMessage.includes(`@${botName.toLowerCase()}`)
+    );
+
+    // Determine if bots should respond
+    const shouldRespond = mentionedBots.length > 0 || Math.random() < 0.25; // 25% chance
+
+    console.log('shouldRespond', shouldRespond);
+
+    return {
+      shouldRespond,
+      mentionedBots,
+    };
   }
 }

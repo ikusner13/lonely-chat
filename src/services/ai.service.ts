@@ -79,34 +79,6 @@ export class AIService {
   }
 
   /**
-   * Analyze if a message should trigger bot responses
-   */
-  analyzeMessageTriggers(
-    message: string,
-    botNames: BotName[]
-  ): {
-    shouldRespond: boolean;
-    mentionedBots: BotName[];
-  } {
-    const lowerMessage = message.toLowerCase();
-
-    // Check for bot mentions
-    const mentionedBots = botNames.filter((botName) =>
-      lowerMessage.includes(`@${botName.toLowerCase()}`)
-    );
-
-    // Determine if bots should respond
-    const shouldRespond = mentionedBots.length > 0 || Math.random() < 0.25; // 25% chance
-
-    console.log('shouldRespond', shouldRespond);
-
-    return {
-      shouldRespond,
-      mentionedBots,
-    };
-  }
-
-  /**
    * Build system prompt that includes awareness of other bots
    */
   private buildSystemPrompt(botName: BotName, otherBots: BotName[]): string {
