@@ -1,14 +1,26 @@
 import { z } from 'zod';
 
 export const AIModelSchema = z
-  .enum(['moonshotai/kimi-k2:free'], {
-    error: 'Invalid model. Must be one of: moonshotai/kimi-k2:free',
-  })
+  .enum(
+    [
+      'moonshotai/kimi-k2:free',
+      'deepseek/deepseek-chat-v3-0324:free',
+      'mistralai/mistral-nemo:free',
+    ],
+    {
+      error:
+        'Invalid model. Must be one of: moonshotai/kimi-k2:free, deepseek/deepseek-chat-v3-0324:free, mistralai/mistral-nemo:free',
+    }
+  )
   .describe('Available AI models from OpenRouter')
   .meta({
     id: 'AIModel',
     title: 'AI Model',
-    examples: ['moonshotai/kimi-k2:free', 'openai/gpt-4o-mini'],
+    examples: [
+      'moonshotai/kimi-k2:free',
+      'deepseek/deepseek-chat-v3-0324:free',
+      'mistralai/mistral-nemo:free',
+    ],
   });
 export type AIModel = z.infer<typeof AIModelSchema>;
 

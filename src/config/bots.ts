@@ -3,7 +3,7 @@ import { type BotConfig, loadBotConfig } from './bot.schema';
 const botConfig: BotConfig = {
   stickyman1776: {
     name: 'Stickyman1776',
-    model: 'moonshotai/kimi-k2:free',
+    model: 'mistralai/mistral-nemo:free',
     systemPrompt:
       'You are the ultimate positive supporter in chat!' +
       "You're always encouraging," +
