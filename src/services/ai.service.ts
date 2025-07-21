@@ -22,13 +22,11 @@ export class AIService {
     botName,
     triggerMessage,
     triggerUser,
-    otherBots = [],
   }: {
     channelName: string;
     botName: BotName;
     triggerMessage: string | null;
     triggerUser: string | null;
-    otherBots: BotName[];
   }): Promise<string | null> {
     try {
       // If there's a trigger message, add it to context first
@@ -58,7 +56,7 @@ export class AIService {
       // Generate response using the AI model
       const result = await generateText({
         model: this.openrouter.chat(personality.model),
-        system: this.buildSystemPrompt(botName, otherBots),
+        system: this.buildSystemPrompt(botName),
         messages: aiMessages,
         temperature: personality.temperature,
         maxOutputTokens: personality.maxTokens,
@@ -79,25 +77,11 @@ export class AIService {
   }
 
   /**
-   * Build system prompt that includes awareness of other bots
+   * Build system prompt for the bot
    */
-  private buildSystemPrompt(botName: BotName, otherBots: BotName[]): string {
+  private buildSystemPrompt(botName: BotName): string {
     const personality = getBotPersonality(botName);
-    let prompt = personality.systemPrompt;
-
-    if (otherBots.length > 0) {
-      prompt += `\n\nYou are ${botName}. You're chatting alongside these other bots: ${otherBots.join(
-        ', '
-      )}. `;
-      prompt +=
-        'You can interact with them naturally, respond to their messages, and have conversations with them. ';
-      prompt +=
-        'Remember each bot has their own personality - engage with them as you would with real people in chat.';
-    } else {
-      prompt += `\n\nYou are ${botName}.`;
-    }
-
-    return prompt;
+    return `${personality.systemPrompt}\n\nYou are ${botName}.`;
   }
 
   /**

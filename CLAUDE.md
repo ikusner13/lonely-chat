@@ -8,9 +8,9 @@ goal: twitch bots to solve loneliness
 
 - AI-powered bots with distinct personalities that engage naturally in Twitch chat
 - Uses Vercel AI SDK v5 with OpenRouter for diverse model support
-- Supports multiple bots that can have autonomous conversations
+- Supports multiple bots that participate as regular chat members
 - Currently configured for single bot operation but ready for multi-bot scaling
-- Bots respond to chat messages, questions, and can initiate conversations
+- Bots respond to chat messages, mentions, and randomly participate in conversations
 
 ## Key Technologies
 
@@ -58,31 +58,27 @@ Currently, no test, lint, or build commands are configured. Bun executes TypeScr
 ## Architecture Notes
 
 ### AI Integration
+
 - **Shared Context**: All bots share a conversation context but interpret it through their personalities
 - **Response Coordination**: Orchestrator prevents response flooding and manages turn-taking
 - **Personality System**: Each bot has configurable personality, model, temperature, and interests
 - **Context Management**: Automatic trimming and cleanup of old conversations
 
 ### Bot Behavior
+
 - Responds to direct mentions (@botname)
-- Engages with questions (30% chance)
-- Responds to greetings (20% chance)
-- Can initiate autonomous conversations (multi-bot only)
+- Randomly participates in conversations (25% chance)
 - Natural response delays to feel human-like
+- Treats all chat members equally (doesn't distinguish between bots and users)
 
 ### Single vs Multi-Bot
-- Single bot: Uses "friendly" personality by default, higher engagement rates
-- Multi-bot: Bots have different personalities and can converse with each other
-- Autonomous conversations only trigger with 2+ bots
 
-### Available Bot Personalities
-- **FriendlyBot**: Enthusiastic, uses emotes, keeps chat fun
-- **MemeLord**: Meme-obsessed, uses Twitch culture references
-- **BigBrainStrat**: Strategic thinker, analyzes gameplay
-- **HypeSquad**: Ultimate positivity, celebrates everything
-- **LoreKeeper**: Deep knowledge about games and stories
+- Single bot: Uses "friendly" personality by default
+- Multi-bot: Bots have different personalities and participate naturally in chat
+- All bots behave as regular chat members without awareness of other bots
 
 ### Environment Variables Required
+
 ```
 TWITCH_CLIENT_ID=your_client_id
 TWITCH_CLIENT_SECRET=your_client_secret

@@ -8,20 +8,13 @@ export interface MessageContext {
   user: string;
   message: string;
   timestamp: Date;
-  mentionedBots: BotName[];
+  mentions: BotName[];
 }
 
-export interface BotResponse {
+export interface ScheduledResponse {
   botName: BotName;
   delay: number;
   priority: 'high' | 'normal' | 'low';
-}
-
-interface ConversationState {
-  isActive: boolean;
-  lastMessageTime: Date;
-  messagesSinceLastBotResponse: number;
-  currentSpeaker?: string;
 }
 
 export class MessageRouter {
@@ -29,11 +22,7 @@ export class MessageRouter {
   private aiService: AIService;
   private orchestrator: MultiBotOrchestratorV2;
   private responseTimers: Map<string, NodeJS.Timeout> = new Map();
-  private conversationState: ConversationState = {
-    isActive: false,
-    lastMessageTime: new Date(),
-    messagesSinceLastBotResponse: 0,
-  };
+  private responseChance = 0.25; // Default 25% chance for non-mention messages
 
   constructor(
     botManager: BotManager,
@@ -46,16 +35,7 @@ export class MessageRouter {
   }
 
   handleIncomingMessage(channel: string, user: string, message: string): void {
-    // Don't process messages from bots themselves
-    if (this.botManager.isBotUsername(user)) {
-      return;
-    }
-
     console.log(`[${channel}] ${user}: ${message}`);
-
-    // Update conversation state
-    this.conversationState.lastMessageTime = new Date();
-    this.conversationState.messagesSinceLastBotResponse++;
 
     // Create message context
     const botNames = this.botManager.getBotNames() as BotName[];
@@ -66,21 +46,21 @@ export class MessageRouter {
       user,
       message,
       timestamp: new Date(),
-      mentionedBots: analysis.mentionedBots,
+      mentions: analysis.mentions,
     };
 
     // Get response decisions from orchestrator
     const responses = this.orchestrator.determineResponses(
-      analysis.mentionedBots,
+      analysis.mentions,
       analysis.shouldRespond
     );
 
-    // Schedule bot responses
-    this.scheduleBotResponses(responses, context);
+    // Schedule responses
+    this.scheduleResponses(responses, context);
   }
 
-  private scheduleBotResponses(
-    responses: BotResponse[],
+  private scheduleResponses(
+    responses: ScheduledResponse[],
     context: MessageContext
   ): void {
     // Clear any existing timers for safety
@@ -89,7 +69,7 @@ export class MessageRouter {
     responses.forEach((response, _index) => {
       const timerId = `${response.botName}-${Date.now()}`;
       const timer = setTimeout(() => {
-        this.executeBotResponse(response.botName, context);
+        this.executeResponse(response.botName, context);
         this.responseTimers.delete(timerId);
       }, response.delay);
 
@@ -97,7 +77,7 @@ export class MessageRouter {
     });
   }
 
-  private async executeBotResponse(
+  private async executeResponse(
     botName: BotName,
     context: MessageContext
   ): Promise<void> {
@@ -109,18 +89,12 @@ export class MessageRouter {
     }
 
     try {
-      // Get list of other bots for context
-      const otherBots = this.botManager
-        .getBotNames()
-        .filter((name) => name !== botName) as BotName[];
-
       // Generate AI response
       const response = await this.aiService.generateResponse({
         channelName: context.channel,
         botName,
         triggerMessage: context.message,
         triggerUser: context.user,
-        otherBots,
       });
 
       if (response) {
@@ -129,8 +103,6 @@ export class MessageRouter {
 
         // Update bot state
         this.botManager.updateBotState(botName);
-        this.conversationState.messagesSinceLastBotResponse = 0;
-        this.conversationState.currentSpeaker = botName;
 
         console.log(`🤖 ${botName}: ${response}`);
       }
@@ -168,23 +140,24 @@ export class MessageRouter {
     botNames: BotName[]
   ): {
     shouldRespond: boolean;
-    mentionedBots: BotName[];
+    mentions: BotName[];
   } {
     const lowerMessage = message.toLowerCase();
 
-    // Check for bot mentions
-    const mentionedBots = botNames.filter((botName) =>
+    // Check for mentions
+    const mentions = botNames.filter((botName) =>
       lowerMessage.includes(`@${botName.toLowerCase()}`)
     );
 
     // Determine if bots should respond
-    const shouldRespond = mentionedBots.length > 0 || Math.random() < 0.25; // 25% chance
+    const shouldRespond =
+      mentions.length > 0 || Math.random() < this.responseChance;
 
     console.log('shouldRespond', shouldRespond);
 
     return {
       shouldRespond,
-      mentionedBots,
+      mentions,
     };
   }
 }

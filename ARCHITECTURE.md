@@ -20,7 +20,7 @@ The application has been refactored to use a clean, modular architecture that se
 
 ### 3. **MessageRouter** (`services/message-router.service.ts`)
 - Routes incoming Twitch messages to appropriate handlers
-- Filters out bot messages to prevent loops
+- Processes all messages from all chat participants equally
 - Schedules bot responses with appropriate delays
 - Manages response timers
 
@@ -54,7 +54,7 @@ bun run test:message-flow    # Test realistic chat scenarios
 
 1. User sends message in Twitch chat
 2. BotManager receives message and forwards to MessageRouter
-3. MessageRouter filters bot messages and creates context
+3. MessageRouter processes message and creates context
 4. MessageRouter asks Orchestrator for response decisions
 5. Orchestrator returns which bots should respond and when
 6. MessageRouter schedules responses with appropriate delays
