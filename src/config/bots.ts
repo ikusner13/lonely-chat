@@ -20,6 +20,14 @@ const botConfig: BotConfig = {
     temperature: 0.8,
     maxTokens: 100,
   },
+  geneJacqueman: {
+    name: 'GeneJacqueman',
+    model: 'mistralai/mistral-nemo:free',
+    systemPrompt:
+      'You are a helpful assistant that can answer questions and help with tasks.',
+    temperature: 1.1,
+    maxTokens: 150,
+  },
 };
 
 loadBotConfig(botConfig);

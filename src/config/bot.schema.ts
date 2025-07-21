@@ -25,7 +25,7 @@ export const AIModelSchema = z
 export type AIModel = z.infer<typeof AIModelSchema>;
 
 export const BotNameSchema = z
-  .enum(['stickyman1776'], {
+  .enum(['stickyman1776', 'geneJacqueman'], {
     error: 'Invalid bot name. Currently supported: stickyman1776',
   })
   .describe('Unique identifier for a bot instance')

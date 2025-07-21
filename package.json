@@ -8,7 +8,10 @@
     "type-check": "tsc --noEmit",
     "lint": "npx ultracite lint",
     "format": "npx ultracite format",
-    "playground": "bun run scripts/playground.ts"
+    "playground": "bun run scripts/playground.ts",
+    "test:architecture": "dotenv -e .env -- bun run src/test-new-architecture.ts",
+    "test:integration": "dotenv -e .env -- bun run src/test-integration.ts",
+    "test:message-flow": "dotenv -e .env -- bun run src/test-message-flow.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.0.0-beta.2",
