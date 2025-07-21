@@ -123,7 +123,7 @@ export class AppBootstrapper {
     );
 
     // Create orchestrator with pure coordination logic
-    const orchestrator = new MultiBotOrchestratorV2();
+    const orchestrator = new MultiBotOrchestratorV2(botManager);
 
     // Initialize message router
     const messageRouter = new MessageRouter(

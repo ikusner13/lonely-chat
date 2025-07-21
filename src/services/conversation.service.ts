@@ -3,7 +3,7 @@ import type { ModelMessage } from 'ai';
 // Message type for conversation history
 export type ChatMessage = ModelMessage & {
   timestamp: Date;
-  author?: string; // For identifying who said what
+  sender: string; // For identifying who said what
 };
 
 // Shared conversation context for a channel
@@ -68,7 +68,7 @@ export class ConversationManager {
       role: 'user',
       content: `${user}: ${message}`,
       timestamp: new Date(),
-      author: user,
+      sender: user,
     };
 
     context.messages.push(userMessage);
@@ -88,7 +88,7 @@ export class ConversationManager {
       role: 'assistant',
       content: response,
       timestamp: new Date(),
-      author: botName,
+      sender: botName,
     };
 
     context.messages.push(botMessage);
@@ -107,11 +107,11 @@ export class ConversationManager {
     // Convert shared context to bot's perspective
     return context.messages.map((msg) => {
       // If this is an assistant message from another bot, convert to user message
-      if (msg.role === 'assistant' && msg.author && msg.author !== botName) {
+      if (msg.sender && msg.sender !== botName) {
         return {
           ...msg,
           role: 'user',
-          content: `${msg.author}: ${msg.content}`,
+          content: `[${msg.sender}]: ${msg.content}`,
         };
       }
       return msg;

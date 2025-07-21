@@ -70,7 +70,10 @@ export class MessageRouter {
     };
 
     // Get response decisions from orchestrator
-    const responses = this.orchestrator.determineResponses(context);
+    const responses = this.orchestrator.determineResponses(
+      analysis.mentionedBots,
+      analysis.shouldRespond
+    );
 
     // Schedule bot responses
     this.scheduleBotResponses(responses, context);

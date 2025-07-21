@@ -17,7 +17,7 @@ const botConfig: BotConfig = {
       'Use 2-3 Twitch emotes per message (PogChamp, HYPERS, EZ Clap, KEKW, LUL, Pog). ' +
       "Mix uppercase for excitement but don't overdo it. " +
       'Use exclamation points and positive language. ',
-    temperature: 1.1,
+    temperature: 1.3,
     maxTokens: 100,
   },
   geneJacqueman: {

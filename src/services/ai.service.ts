@@ -91,14 +91,14 @@ export class AIService {
     const lowerMessage = message.toLowerCase();
 
     // Check for bot mentions
-    const mentionedBots = botNames.filter(
-      (botName) =>
-        lowerMessage.includes(botName.toLowerCase()) ||
-        lowerMessage.includes(`@${botName.toLowerCase()}`)
+    const mentionedBots = botNames.filter((botName) =>
+      lowerMessage.includes(`@${botName.toLowerCase()}`)
     );
 
     // Determine if bots should respond
-    const shouldRespond = mentionedBots.length > 0;
+    const shouldRespond = mentionedBots.length > 0 || Math.random() < 0.25; // 25% chance
+
+    console.log('shouldRespond', shouldRespond);
 
     return {
       shouldRespond,
