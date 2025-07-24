@@ -57,9 +57,15 @@ export class MessageRouter {
     // Debug: Log when this method is called
     console.log(`🔍 handleIncomingMessage called at ${new Date().toISOString()}`);
 
+    // IMPORTANT: Ignore messages from bots to prevent feedback loops
+    if (this.botManager.isBotUsername(user)) {
+      console.log(`🚫 Ignoring message from bot: ${user}`);
+      return;
+    }
+
     // Create message context
     const botNames = this.botManager.getBotNames() as BotName[];
-    console.log(`🤖 Available bot names for mention detection:`, botNames);
+    console.log('🤖 Available bot names for mention detection:', botNames);
     const analysis = this.analyzeMessageTriggers(message, botNames);
 
     const context: MessageContext = {
