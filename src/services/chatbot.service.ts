@@ -1,3 +1,4 @@
+import { ApiClient } from '@twurple/api';
 import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient, type ChatMessage } from '@twurple/chat';
 
@@ -6,6 +7,8 @@ interface TokenData {
   refreshToken: string;
   expiresIn: number;
   obtainmentTimestamp: number;
+  scope?: string[];
+  userId?: string;
 }
 
 export type TokenRefreshCallback = (
@@ -16,6 +19,7 @@ export type TokenRefreshCallback = (
 export class TwitchChatBot {
   private authProvider!: RefreshingAuthProvider;
   private chatClient!: ChatClient;
+  private apiClient!: ApiClient;
   private clientId: string;
   private clientSecret: string;
   private tokenData: TokenData;
@@ -41,8 +45,10 @@ export class TwitchChatBot {
     // Set up token refresh callback
     this.authProvider.onRefresh(
       async (userId: string, newTokenData: AccessToken) => {
-        // Update internal token data
+        // Update internal token data - PRESERVE the original bot's userId and scope
+        // Update token data while preserving bot-specific fields
         this.tokenData = {
+          ...this.tokenData, // Keep all existing fields
           accessToken: newTokenData.accessToken,
           // biome-ignore lint/style/noNonNullAssertion: refresh token is there
           refreshToken: newTokenData.refreshToken!,
@@ -52,18 +58,42 @@ export class TwitchChatBot {
 
         // Call external callback if provided
         if (this.onTokenRefresh) {
-          await this.onTokenRefresh(userId, newTokenData);
+          await this.onTokenRefresh(
+            this.tokenData.userId || userId,
+            newTokenData
+          );
         }
       }
     );
 
-    // Add the stored tokens
-    await this.authProvider.addUserForToken(this.tokenData, ['chat']);
+    // Add the stored tokens with appropriate intents
+    const intents = ['chat'];
+
+    // Check if this bot has moderator permissions
+    const hasModeratorScopes = this.tokenData.scope?.some((scope) =>
+      scope.startsWith('moderator:')
+    );
+
+    if (hasModeratorScopes) {
+      intents.push('moderator');
+    }
+
+    // Add the bot's token to the auth provider
+    // The userId should already be in the tokenData from token generation
+    console.log(`🔍 Bot token data userId: ${this.tokenData.userId}`);
+    console.log(`🔍 Bot token scopes: ${this.tokenData.scope?.join(', ')}`);
+
+    await this.authProvider.addUserForToken(this.tokenData, intents);
 
     // Create chat client
     this.chatClient = new ChatClient({
       authProvider: this.authProvider,
       channels: [], // Channels will be joined explicitly
+    });
+
+    // Re-create API client with proper auth
+    this.apiClient = new ApiClient({
+      authProvider: this.authProvider,
     });
 
     // Set up event handlers
@@ -131,5 +161,28 @@ export class TwitchChatBot {
     ) => void
   ): void {
     this.chatClient.onMessage(handler);
+  }
+
+  getApiClient(): ApiClient {
+    return this.apiClient;
+  }
+
+  getUserId(): string | undefined {
+    return this.tokenData.userId;
+  }
+
+  getCurrentUser() {
+    // Return cached user info if we have the userId
+    if (this.tokenData.userId) {
+      return {
+        id: this.tokenData.userId,
+        name: 'bot', // We don't have the name cached
+      };
+    }
+    return null;
+  }
+
+  getChatClient(): ChatClient {
+    return this.chatClient;
   }
 }

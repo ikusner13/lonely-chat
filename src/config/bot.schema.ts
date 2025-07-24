@@ -4,16 +4,14 @@ export const AI_MODELS = [
   'moonshotai/kimi-k2:free',
   'deepseek/deepseek-chat-v3-0324:free',
   'mistralai/mistral-nemo:free',
+  'moonshotai/kimi-k2',
 ] as const;
 
 export const AIModelSchema = z
-  .enum(
-    AI_MODELS,
-    {
-      error:
-        'Invalid model. Must be one of: moonshotai/kimi-k2:free, deepseek/deepseek-chat-v3-0324:free, mistralai/mistral-nemo:free',
-    }
-  )
+  .enum(AI_MODELS, {
+    error:
+      'Invalid model. Must be one of: moonshotai/kimi-k2:free, deepseek/deepseek-chat-v3-0324:free, mistralai/mistral-nemo:free',
+  })
   .describe('Available AI models from OpenRouter')
   .meta({
     id: 'AIModel',
@@ -27,14 +25,15 @@ export const AIModelSchema = z
 export type AIModel = z.infer<typeof AIModelSchema>;
 
 export const BotNameSchema = z
-  .enum(['stickyman1776', 'geneJacqueman'], {
-    error: 'Invalid bot name. Currently supported: stickyman1776',
+  .enum(['stickyman1776', 'geneJacqueman', 'neckbearddiscordmod'], {
+    error:
+      'Invalid bot name. Currently supported: stickyman1776, geneJacqueman, moderatorBot',
   })
   .describe('Unique identifier for a bot instance')
   .meta({
     id: 'BotName',
     title: 'Bot Name',
-    examples: ['stickyman1776'],
+    examples: ['stickyman1776', 'geneJacqueman', 'moderatorBot'],
   });
 export type BotName = z.infer<typeof BotNameSchema>;
 
@@ -50,7 +49,9 @@ export const BotPersonalitySchema = z
     fallbackModels: z
       .array(AIModelSchema)
       .optional()
-      .describe('Ordered list of fallback models to try if primary model fails'),
+      .describe(
+        'Ordered list of fallback models to try if primary model fails'
+      ),
     systemPrompt: z
       .string({
         error: 'System prompt must be a string',
@@ -113,7 +114,10 @@ export const BotPersonalitySchema = z
       {
         name: 'Stickyman1776',
         model: 'moonshotai/kimi-k2:free',
-        fallbackModels: ['mistralai/mistral-nemo:free', 'deepseek/deepseek-chat-v3-0324:free'],
+        fallbackModels: [
+          'mistralai/mistral-nemo:free',
+          'deepseek/deepseek-chat-v3-0324:free',
+        ],
         systemPrompt: 'You are a friendly bot!',
         temperature: 0.8,
         maxTokens: 100,

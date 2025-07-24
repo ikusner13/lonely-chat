@@ -88,6 +88,8 @@ export class BotManager {
       refreshToken: tokenData.refreshToken,
       expiresIn: 0, // Will be refreshed
       obtainmentTimestamp: Date.now(),
+      scope: tokenData.scope,
+      userId: tokenData.userId,
     };
 
     // Initialize the TwitchChatBot with token data

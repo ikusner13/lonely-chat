@@ -5,6 +5,7 @@
     "dev": "dotenv -e .env -- bun run src/index.ts",
     "generate-token": "dotenv -e .env -- bun run scripts/generate-tokens.ts",
     "generate-channel-token": "dotenv -e .env -- bun run scripts/generate-channel-token.ts",
+    "generate-moderator-token": "dotenv -e .env -- bun run scripts/generate-moderator-token.ts",
     "type-check": "tsc --noEmit",
     "lint": "npx ultracite lint",
     "format": "npx ultracite format",
@@ -24,6 +25,7 @@
     "ai": "5.0.0-beta.10",
     "arctic": "^3.7.0",
     "hono": "^4.8.5",
+    "open": "^10.2.0",
     "p-queue": "^8.1.0",
     "zod": "^4.0.5"
   },

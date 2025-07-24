@@ -1,7 +1,7 @@
 import { getBotConfig } from './config/bot.schema';
 import { env } from './env';
 import { MultiBotOrchestratorV2 } from './multi-bot-orchestrator-v2';
-import { AIService } from './services/ai.service';
+import { AIServiceWithTools } from './services/ai-with-tools.service';
 import { BotManager } from './services/bot-manager.service';
 import { ConversationManager } from './services/conversation.service';
 import { MessageRouter } from './services/message-router.service';
@@ -12,7 +12,7 @@ import { TokenManager } from './services/token.service';
 export interface ServiceContainer {
   tokenManager: TokenManager;
   conversationManager: ConversationManager;
-  aiService: AIService;
+  aiService: AIServiceWithTools;
   botManager: BotManager;
   streamService: StreamService;
   streamLifecycleManager: StreamLifecycleManager;
@@ -95,7 +95,6 @@ export class AppBootstrapper {
 
     // Initialize core services
     const conversationManager = new ConversationManager();
-    const aiService = new AIService(conversationManager);
 
     // Initialize bot manager
     const botManager = new BotManager({
@@ -106,6 +105,13 @@ export class AppBootstrapper {
 
     // Initialize all bot clients with configuration
     await botManager.initializeAllBots(getBotConfig());
+
+    // Initialize AI service after bot manager is ready
+    const aiService = new AIServiceWithTools(
+      conversationManager,
+      botManager,
+      env.TWITCH_CHANNEL_NAME
+    );
 
     // Initialize stream service
     const streamService = new StreamService(

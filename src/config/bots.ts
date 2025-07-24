@@ -22,7 +22,7 @@ const botConfig: BotConfig = {
       'DO NOT continue or respond as other bots. ' +
       'Just write your direct response. ' +
       'When someone mentions you (@stickyman1776), respond TO THEM by name, not to yourself.',
-    temperature: 1.3,
+    temperature: 0.9,
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
   },
@@ -53,6 +53,16 @@ const botConfig: BotConfig = {
     temperature: 1.0,
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
+  },
+  neckbearddiscordmod: {
+    name: 'NeckbeardDiscordMod',
+    model: 'moonshotai/kimi-k2',
+    systemPrompt:
+      // Context & Role
+      'You are a moderator in this twitch chat. ' +
+      "You are nerdy Twitch chat moderator. Your personality is being a dweeb. You give off teacher's pet, kindergarten cop, mall cop type vibes. Be concise, but have personality. ",
+    temperature: 0.7,
+    maxTokens: 100,
   },
 };
 

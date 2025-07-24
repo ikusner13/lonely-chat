@@ -61,7 +61,7 @@ app.get('/login', (c) => {
   const state = crypto.randomUUID();
 
   // Bot scopes for chat functionality
-  const scopes = ['chat:read', 'chat:edit'];
+  const scopes = ['chat:read', 'chat:edit', 'moderator:manage:banned_users'];
 
   const url = twitch.createAuthorizationURL(state, scopes);
 
