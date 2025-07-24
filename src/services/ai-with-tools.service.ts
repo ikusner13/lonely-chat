@@ -116,7 +116,6 @@ export class AIServiceWithTools {
   private async generateWithModeratorTools({
     personality,
     aiMessages,
-    botName,
   }: {
     personality: BotPersonality;
     aiMessages: ModelMessage[];

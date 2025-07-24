@@ -7,6 +7,12 @@ export const AI_MODELS = [
   'moonshotai/kimi-k2',
 ] as const;
 
+export const BOTS = [
+  'stickyman1776',
+  'geneJacqueman',
+  'neckbearddiscordmod',
+] as const;
+
 export const AIModelSchema = z
   .enum(AI_MODELS, {
     error:
@@ -25,15 +31,15 @@ export const AIModelSchema = z
 export type AIModel = z.infer<typeof AIModelSchema>;
 
 export const BotNameSchema = z
-  .enum(['stickyman1776', 'geneJacqueman', 'neckbearddiscordmod'], {
+  .enum(BOTS, {
     error:
-      'Invalid bot name. Currently supported: stickyman1776, geneJacqueman, moderatorBot',
+      'Invalid bot name. Currently supported: stickyman1776, geneJacqueman, neckbearddiscordmod',
   })
   .describe('Unique identifier for a bot instance')
   .meta({
     id: 'BotName',
     title: 'Bot Name',
-    examples: ['stickyman1776', 'geneJacqueman', 'moderatorBot'],
+    examples: ['stickyman1776', 'geneJacqueman', 'neckbearddiscordmod'],
   });
 export type BotName = z.infer<typeof BotNameSchema>;
 

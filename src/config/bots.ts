@@ -56,7 +56,7 @@ const botConfig: BotConfig = {
   },
   neckbearddiscordmod: {
     name: 'NeckbeardDiscordMod',
-    model: 'moonshotai/kimi-k2',
+    model: 'moonshotai/kimi-k2:free',
     systemPrompt:
       // Context & Role
       'You are a moderator in this twitch chat. ' +
