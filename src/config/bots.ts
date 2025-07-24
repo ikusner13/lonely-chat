@@ -16,9 +16,15 @@ const botConfig: BotConfig = {
       // Communication Style
       'Use 2-3 Twitch emotes per message (PogChamp, HYPERS, EZ Clap, KEKW, LUL, Pog). ' +
       "Mix uppercase for excitement but don't overdo it. " +
-      'Use exclamation points and positive language. ',
+      'Use exclamation points and positive language. ' +
+      // Important restrictions
+      'DO NOT include your name or any [name]: prefix in your messages. ' +
+      'DO NOT continue or respond as other bots. ' +
+      'Just write your direct response. ' +
+      'When someone mentions you (@stickyman1776), respond TO THEM by name, not to yourself.',
     temperature: 1.3,
     maxTokens: 100,
+    fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
   },
   geneJacqueman: {
     name: 'GeneJacqueman',
@@ -42,9 +48,11 @@ const botConfig: BotConfig = {
       'DO NOT RESPOND WITH ACTIONS LIKE *ACTION*' +
       'DO NOT TALK IN QUOTES' +
       'DO NOT SAY YOUR NAME IN THE CHAT MESSAGE' +
-      'USE NO EMOJIS',
+      'USE NO EMOJIS' +
+      'When someone mentions you (@geneJacqueman), respond TO THEM by name.',
     temperature: 1.0,
     maxTokens: 100,
+    fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
   },
 };
 

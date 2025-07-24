@@ -1,12 +1,14 @@
 import { z } from 'zod';
 
+export const AI_MODELS = [
+  'moonshotai/kimi-k2:free',
+  'deepseek/deepseek-chat-v3-0324:free',
+  'mistralai/mistral-nemo:free',
+] as const;
+
 export const AIModelSchema = z
   .enum(
-    [
-      'moonshotai/kimi-k2:free',
-      'deepseek/deepseek-chat-v3-0324:free',
-      'mistralai/mistral-nemo:free',
-    ],
+    AI_MODELS,
     {
       error:
         'Invalid model. Must be one of: moonshotai/kimi-k2:free, deepseek/deepseek-chat-v3-0324:free, mistralai/mistral-nemo:free',
@@ -45,6 +47,10 @@ export const BotPersonalitySchema = z
       .min(1, { error: 'Bot name cannot be empty' })
       .describe('Display name for the bot'),
     model: AIModelSchema,
+    fallbackModels: z
+      .array(AIModelSchema)
+      .optional()
+      .describe('Ordered list of fallback models to try if primary model fails'),
     systemPrompt: z
       .string({
         error: 'System prompt must be a string',
@@ -72,6 +78,33 @@ export const BotPersonalitySchema = z
       .default(150)
       .describe('Maximum number of tokens in bot responses'),
   })
+  .refine(
+    (data) => {
+      // Ensure fallback models don't include the primary model
+      if (data.fallbackModels) {
+        return !data.fallbackModels.includes(data.model);
+      }
+      return true;
+    },
+    {
+      message: 'Fallback models cannot include the primary model',
+      path: ['fallbackModels'],
+    }
+  )
+  .refine(
+    (data) => {
+      // Ensure no duplicate fallback models
+      if (data.fallbackModels) {
+        const uniqueModels = new Set(data.fallbackModels);
+        return uniqueModels.size === data.fallbackModels.length;
+      }
+      return true;
+    },
+    {
+      message: 'Fallback models must be unique',
+      path: ['fallbackModels'],
+    }
+  )
   .describe('Complete configuration for a bot personality')
   .meta({
     id: 'BotPersonality',
@@ -80,6 +113,7 @@ export const BotPersonalitySchema = z
       {
         name: 'Stickyman1776',
         model: 'moonshotai/kimi-k2:free',
+        fallbackModels: ['mistralai/mistral-nemo:free', 'deepseek/deepseek-chat-v3-0324:free'],
         systemPrompt: 'You are a friendly bot!',
         temperature: 0.8,
         maxTokens: 100,
@@ -103,6 +137,7 @@ export const BotConfigSchema = z
         stickyman1776: {
           name: 'Stickyman1776',
           model: 'moonshotai/kimi-k2:free',
+          fallbackModels: ['deepseek/deepseek-chat-v3-0324:free'],
           systemPrompt: 'You are a friendly bot!',
           temperature: 0.8,
           maxTokens: 100,

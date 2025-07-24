@@ -55,7 +55,9 @@ export class AIService {
 
       // Generate response using the AI model
       const result = await generateText({
-        model: this.openrouter.chat(personality.model),
+        model: this.openrouter.chat(personality.model, {
+          models: [],
+        }),
         system: this.buildSystemPrompt(botName),
         messages: aiMessages,
         temperature: personality.temperature,
@@ -81,7 +83,11 @@ export class AIService {
    */
   private buildSystemPrompt(botName: BotName): string {
     const personality = getBotPersonality(botName);
-    return `${personality.systemPrompt}\n\nYou are ${botName}.`;
+    return `${personality.systemPrompt}\n\nYou are ${botName}. Remember: 
+- Write ONLY your direct response, no [name]: prefixes
+- Do NOT roleplay as other bots or continue their messages
+- When you see [otherbot]: message, that's just context - don't mimic that format
+- When someone mentions @${botName}, they are talking TO YOU. You ARE ${botName}, so respond accordingly`;
   }
 
   /**

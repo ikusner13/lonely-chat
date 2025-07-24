@@ -53,9 +53,13 @@ export class MessageRouter {
 
   handleIncomingMessage(channel: string, user: string, message: string): void {
     console.log(`[${channel}] ${user}: ${message}`);
+    
+    // Debug: Log when this method is called
+    console.log(`🔍 handleIncomingMessage called at ${new Date().toISOString()}`);
 
     // Create message context
     const botNames = this.botManager.getBotNames() as BotName[];
+    console.log(`🤖 Available bot names for mention detection:`, botNames);
     const analysis = this.analyzeMessageTriggers(message, botNames);
 
     const context: MessageContext = {
@@ -71,6 +75,9 @@ export class MessageRouter {
       analysis.mentions,
       analysis.shouldRespond
     );
+    
+    // Debug: Log how many responses were determined
+    console.log(`📊 Orchestrator determined ${responses.length} responses:`, responses);
 
     // Queue each response immediately (no timer conflicts!)
     for (const response of responses) {
@@ -157,13 +164,19 @@ export class MessageRouter {
   setupMessageHandlers(_channelName: string): void {
     const botNames = this.botManager.getBotNames();
 
-    for (const botName of botNames) {
+    // Set up message handler only on the FIRST bot
+    // This bot will listen to all messages and route them appropriately
+    if (botNames.length > 0) {
+      const listenerBot = botNames[0];
+      
       this.botManager.setMessageHandler(
-        botName,
+        listenerBot,
         (channel: string, user: string, message: string) => {
           this.handleIncomingMessage(channel, user, message);
         }
       );
+      
+      console.log(`✅ Message handler set up on bot: ${listenerBot} (listening for all messages)`);
     }
   }
 
