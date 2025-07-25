@@ -18,68 +18,17 @@ export class StreamService {
   private readonly apiClient: ApiClient;
   private readonly channelUserId: string;
   private readonly eventSubListener: EventSubWsListener;
-  private readonly authProvider: RefreshingAuthProvider;
 
   private constructor(
-    clientId: string,
-    clientSecret: string,
+    apiClient: ApiClient,
     channelUserId: string,
-    tokenManager: TokenManager,
-    onStreamOnline: (event: EventSubStreamOnlineEvent) => void,
-    onStreamOffline: (event: EventSubStreamOfflineEvent) => void
+    eventSubListener: EventSubWsListener
   ) {
+    this.apiClient = apiClient;
     this.channelUserId = channelUserId;
-    
-    this.authProvider = this.setupAuthProvider(
-      clientId,
-      clientSecret,
-      tokenManager
-    );
-    
-    this.apiClient = new ApiClient({ authProvider: this.authProvider });
-    
-    this.eventSubListener = this.setupEventSub(
-      onStreamOnline,
-      onStreamOffline
-    );
+    this.eventSubListener = eventSubListener;
   }
 
-  private setupAuthProvider(
-    clientId: string,
-    clientSecret: string,
-    tokenManager: TokenManager
-  ): RefreshingAuthProvider {
-    const authProvider = new RefreshingAuthProvider({
-      clientId,
-      clientSecret,
-    });
-
-    authProvider.onRefresh(
-      async (userId: string, newTokenData: AccessToken) => {
-        const updatedToken = tokenManager.convertAccessToken(
-          newTokenData,
-          userId
-        );
-        await tokenManager.updateChannelToken(updatedToken);
-      }
-    );
-
-    return authProvider;
-  }
-
-  private setupEventSub(
-    onStreamOnline: (event: EventSubStreamOnlineEvent) => void,
-    onStreamOffline: (event: EventSubStreamOfflineEvent) => void
-  ): EventSubWsListener {
-    const eventSubListener = new EventSubWsListener({
-      apiClient: this.apiClient,
-    });
-
-    eventSubListener.onStreamOnline(this.channelUserId, onStreamOnline);
-    eventSubListener.onStreamOffline(this.channelUserId, onStreamOffline);
-
-    return eventSubListener;
-  }
 
   static async create({
     clientId,
@@ -98,31 +47,47 @@ export class StreamService {
     onStreamOnline: (event: EventSubStreamOnlineEvent) => void;
     onStreamOffline: (event: EventSubStreamOfflineEvent) => void;
   }): Promise<StreamService> {
-    const service = new StreamService(
+    // Setup auth provider
+    const authProvider = new RefreshingAuthProvider({
       clientId,
       clientSecret,
-      channelUserId,
-      tokenManager,
-      onStreamOnline,
-      onStreamOffline
+    });
+
+    authProvider.onRefresh(
+      async (userId: string, newTokenData: AccessToken) => {
+        const updatedToken = tokenManager.convertAccessToken(
+          newTokenData,
+          userId
+        );
+        await tokenManager.updateChannelToken(updatedToken);
+      }
     );
 
-    // Initialize auth provider with token
-    await service.initializeAuth(channelToken);
-    
-    // Start EventSub listener
-    service.eventSubListener.start();
-
-    return service;
-  }
-
-  private async initializeAuth(channelToken: TokenData): Promise<void> {
-    await this.authProvider.addUserForToken({
+    await authProvider.addUserForToken({
       accessToken: channelToken.accessToken,
       refreshToken: channelToken.refreshToken,
       expiresIn: channelToken.expiresIn || null,
       obtainmentTimestamp: channelToken.obtainmentTimestamp || Date.now(),
     });
+
+    // Create API client
+    const apiClient = new ApiClient({ authProvider });
+
+    // Setup EventSub listener
+    const eventSubListener = new EventSubWsListener({
+      apiClient,
+    });
+
+    eventSubListener.onStreamOnline(channelUserId, onStreamOnline);
+    eventSubListener.onStreamOffline(channelUserId, onStreamOffline);
+    eventSubListener.start();
+
+    // Create service instance
+    return new StreamService(
+      apiClient,
+      channelUserId,
+      eventSubListener
+    );
   }
 
   async isStreamOnline(): Promise<boolean> {
