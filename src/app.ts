@@ -1,4 +1,5 @@
 import type { BotName } from '@/config/bot.schema';
+import { BOTS, getBotConfig } from '@/config/bot.schema';
 import { env } from '@/env';
 import { AIService } from './services/ai.service';
 import {
@@ -33,37 +34,35 @@ export class App {
     this.messageWindow = new ChatMessageWindow();
     this.queue = new ChatbotQueue();
 
-    // Create regular bots (but don't connect yet)
-    this.logger.info('🤖 Creating bots...');
-    try {
-      this.bots.set(
-        'stickyman1776',
-        await ChatbotService.create(this.tokenManager, 'stickyman1776')
-      );
-      this.logger.info('✅ Created bot: stickyman1776');
-
-      this.bots.set(
-        'geneJacqueman',
-        await ChatbotService.create(this.tokenManager, 'geneJacqueman')
-      );
-      this.logger.info('✅ Created bot: geneJacqueman');
-    } catch (error) {
-      this.logger.error({ err: error }, '❌ Failed to create bots');
-      throw error;
-    }
-
-    // Create moderator bot (but don't connect yet)
-    this.logger.info('👮 Creating moderator bot...');
-    try {
-      this.moderatorBot = await ModeratorBotService.create(
-        this.tokenManager,
-        'neckbearddiscordmod'
-      );
-      this.logger.info('✅ Created moderator bot: neckbearddiscordmod');
-    } catch (error) {
-      this.logger.error({ err: error }, '❌ Failed to create moderator bot');
-      throw error;
-    }
+    // Create bots based on configuration
+    this.logger.info('🤖 Creating bots from configuration...');
+    const config = getBotConfig();
+    
+    // Create all bots concurrently
+    await Promise.all(
+      BOTS.map(async (botName) => {
+        try {
+          const botPersonality = config[botName];
+          if (botPersonality.isModerator) {
+            // Create moderator bot
+            this.logger.info(`👮 Creating moderator bot: ${botName}...`);
+            this.moderatorBot = await ModeratorBotService.create(
+              this.tokenManager,
+              botName
+            );
+            this.logger.info(`✅ Created moderator bot: ${botName}`);
+          } else {
+            // Create regular bot
+            const bot = await ChatbotService.create(this.tokenManager, botName);
+            this.bots.set(botName, bot);
+            this.logger.info(`✅ Created bot: ${botName}`);
+          }
+        } catch (error) {
+          this.logger.error({ err: error }, `❌ Failed to create bot: ${botName}`);
+          throw error;
+        }
+      })
+    );
 
     // Create chat listener (but don't start yet)
     this.chatListener = new ChatListenerService();
@@ -111,8 +110,7 @@ export class App {
     this.messageWindow.addMessage(msg);
 
     // Don't process messages from our own bots
-    const botNames = ['stickyman1776', 'geneJacqueman', 'neckbearddiscordmod'];
-    if (botNames.includes(msg.user.toLowerCase())) {
+    if (BOTS.includes(msg.user.toLowerCase() as BotName)) {
       return;
     }
 

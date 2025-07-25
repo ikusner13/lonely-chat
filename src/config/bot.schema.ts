@@ -85,6 +85,10 @@ export const BotPersonalitySchema = z
       .max(4000, { error: 'Max tokens cannot exceed 4000' })
       .default(150)
       .describe('Maximum number of tokens in bot responses'),
+    isModerator: z
+      .boolean()
+      .default(false)
+      .describe('Whether this bot has moderator privileges'),
   })
   .refine(
     (data) => {

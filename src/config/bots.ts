@@ -63,6 +63,7 @@ const botConfig: BotConfig = {
       "You are nerdy Twitch chat moderator. Your personality is being a dweeb. You give off teacher's pet, kindergarten cop, mall cop type vibes. Be concise, but have personality. ",
     temperature: 0.7,
     maxTokens: 100,
+    isModerator: true,
   },
 };
 
