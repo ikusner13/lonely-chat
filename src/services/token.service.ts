@@ -1,4 +1,5 @@
 import type { AccessToken } from '@twurple/auth';
+import { createLogger } from '@/utils/logger';
 
 export interface TokenData {
   accessToken: string;
@@ -26,6 +27,7 @@ export class TokenManager {
   private readonly mainTokenPath: string;
   private tokenCache: TokenStorage | null = null;
   private botTokenPaths: Map<string, string> = new Map();
+  private logger = createLogger('TokenManager');
 
   constructor(mainTokenPath = './tokens.json') {
     this.mainTokenPath = mainTokenPath;
@@ -145,10 +147,10 @@ export class TokenManager {
         // biome-ignore lint/nursery/noAwaitInLoop: fine
         if (await file.exists()) {
           await file.delete();
-          console.log(`🗑️ Cleaned up token file for ${botName}`);
+          this.logger.info(`🗑️ Cleaned up token file for ${botName}`);
         }
       } catch (error) {
-        console.error(`Failed to clean up token file for ${botName}:`, error);
+        this.logger.error({ err: error }, `Failed to clean up token file for ${botName}`);
       }
     }
 

@@ -4,9 +4,11 @@ import { type BotName, getBotPersonality } from '@/config/bot.schema';
 import { env } from '@/env';
 import '@/config/bots';
 import z from 'zod';
+import { createLogger } from '@/utils/logger';
 
 export class AIService {
   private openrouter;
+  private logger = createLogger('AIService');
 
   constructor() {
     this.openrouter = createOpenRouter({ apiKey: env.OPENROUTER_KEY });
@@ -69,7 +71,7 @@ export class AIService {
 
       return result.text;
     } catch (error) {
-      console.error(`Error generating AI response for ${botName}:`, error);
+      this.logger.error({ err: error }, `Error generating AI response for ${botName}`);
       return null;
     }
   }

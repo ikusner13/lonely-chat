@@ -1,13 +1,16 @@
 import { App } from './app';
+import { logger } from './utils/logger';
+
+const mainLogger = logger.child({ module: 'main' });
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n⏹️  Shutting down gracefully...');
+  mainLogger.info('⏹️  Shutting down gracefully...');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n⏹️  Shutting down gracefully...');
+  mainLogger.info('⏹️  Shutting down gracefully...');
   process.exit(0);
 });
 
@@ -15,7 +18,7 @@ process.on('SIGTERM', () => {
 async function main() {
   const app = new App();
   await app.start().catch((error) => {
-    console.error('❌ Failed to start app:', error);
+    mainLogger.error({ err: error }, '❌ Failed to start app');
     process.exit(1);
   });
 }

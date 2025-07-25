@@ -11,6 +11,7 @@ import { ChatbotQueue } from './services/chatbot-queue';
 import { ModeratorBotService } from './services/moderatorbot.service';
 import { StreamService } from './services/stream.service';
 import { TokenManager } from './services/token.service';
+import { createLogger } from './utils/logger';
 
 export class App {
   private chatListener!: ChatListenerService;
@@ -21,9 +22,10 @@ export class App {
   private ai!: AIService;
   private stream!: StreamService;
   private tokenManager!: TokenManager;
+  private logger = createLogger('App');
 
   async start() {
-    console.log('🚀 Starting Twitch Bot App...');
+    this.logger.info('🚀 Starting Twitch Bot App...');
 
     // Initialize core services
     this.tokenManager = new TokenManager();
@@ -32,34 +34,34 @@ export class App {
     this.queue = new ChatbotQueue();
 
     // Create regular bots (but don't connect yet)
-    console.log('🤖 Creating bots...');
+    this.logger.info('🤖 Creating bots...');
     try {
       this.bots.set(
         'stickyman1776',
         await ChatbotService.create(this.tokenManager, 'stickyman1776')
       );
-      console.log('✅ Created bot: stickyman1776');
+      this.logger.info('✅ Created bot: stickyman1776');
 
       this.bots.set(
         'geneJacqueman',
         await ChatbotService.create(this.tokenManager, 'geneJacqueman')
       );
-      console.log('✅ Created bot: geneJacqueman');
+      this.logger.info('✅ Created bot: geneJacqueman');
     } catch (error) {
-      console.error('❌ Failed to create bots:', error);
+      this.logger.error({ err: error }, '❌ Failed to create bots');
       throw error;
     }
 
     // Create moderator bot (but don't connect yet)
-    console.log('👮 Creating moderator bot...');
+    this.logger.info('👮 Creating moderator bot...');
     try {
       this.moderatorBot = await ModeratorBotService.create(
         this.tokenManager,
         'neckbearddiscordmod'
       );
-      console.log('✅ Created moderator bot: neckbearddiscordmod');
+      this.logger.info('✅ Created moderator bot: neckbearddiscordmod');
     } catch (error) {
-      console.error('❌ Failed to create moderator bot:', error);
+      this.logger.error({ err: error }, '❌ Failed to create moderator bot');
       throw error;
     }
 
@@ -75,7 +77,7 @@ export class App {
     }
 
     // Stream lifecycle - this is what controls everything
-    console.log('📡 Setting up stream monitoring...');
+    this.logger.info('📡 Setting up stream monitoring...');
     this.stream = await StreamService.create({
       clientId: env.TWITCH_CLIENT_ID,
       clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -83,11 +85,11 @@ export class App {
       tokenManager: this.tokenManager,
       channelToken,
       onStreamOnline: () => {
-        console.log('🟢 Stream is online! Connecting bots...');
+        this.logger.info('🟢 Stream is online! Connecting bots...');
         this.connectAll();
       },
       onStreamOffline: () => {
-        console.log('🔴 Stream is offline! Disconnecting bots...');
+        this.logger.info('🔴 Stream is offline! Disconnecting bots...');
         this.disconnectAll();
       },
     });
@@ -95,13 +97,13 @@ export class App {
     // Check if stream is already online
     const isOnline = await this.stream.isStreamOnline();
     if (isOnline) {
-      console.log('🟢 Stream is already online, connecting bots...');
+      this.logger.info('🟢 Stream is already online, connecting bots...');
       this.connectAll();
     } else {
-      console.log('⏸️  Stream is offline, waiting for stream to go online...');
+      this.logger.info('⏸️  Stream is offline, waiting for stream to go online...');
     }
 
-    console.log('✅ App started successfully!');
+    this.logger.info('✅ App started successfully!');
   }
 
   private async handleIncomingMessage(msg: ChatMessage) {
@@ -149,7 +151,7 @@ export class App {
       const bot = this.bots.get(botName);
 
       if (!bot) {
-        console.error(`Bot ${botName} not found`);
+        this.logger.error(`Bot ${botName} not found`);
         continue;
       }
 
@@ -165,7 +167,7 @@ export class App {
             bot.say(response);
           }
         } catch (error) {
-          console.error(`Error generating response for ${botName}:`, error);
+          this.logger.error({ err: error }, `Error generating response for ${botName}`);
         }
       });
     }
@@ -182,7 +184,7 @@ export class App {
         })
         .then(() => resolve(false))
         .catch((error) => {
-          console.error('Error checking moderation:', error);
+          this.logger.error({ err: error }, 'Error checking moderation');
           resolve(false); // Don't moderate on error
         });
     });
@@ -194,34 +196,34 @@ export class App {
 
     // Start listening to chat
     this.chatListener.start();
-    console.log('👂 Chat listener started');
+    this.logger.info('👂 Chat listener started');
 
     // Connect all bots
     this.moderatorBot.joinChannel();
-    console.log('👮 Moderator bot connected');
+    this.logger.info('👮 Moderator bot connected');
 
     for (const [name, bot] of this.bots) {
       bot.joinChannel();
-      console.log(`🤖 Bot ${name} connected`);
+      this.logger.info(`🤖 Bot ${name} connected`);
     }
   }
 
   private disconnectAll() {
     // Stop listening to chat
     this.chatListener.stop();
-    console.log('🔇 Chat listener stopped');
+    this.logger.info('🔇 Chat listener stopped');
 
     // Disconnect all bots
     this.moderatorBot.leaveChannel();
-    console.log('👮 Moderator bot disconnected');
+    this.logger.info('👮 Moderator bot disconnected');
 
     for (const [name, bot] of this.bots) {
       bot.leaveChannel();
-      console.log(`🤖 Bot ${name} disconnected`);
+      this.logger.info(`🤖 Bot ${name} disconnected`);
     }
 
     // Clear any pending messages
     this.queue.stop();
-    console.log('🧹 Message queue cleared');
+    this.logger.info('🧹 Message queue cleared');
   }
 }

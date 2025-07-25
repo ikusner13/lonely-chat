@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createLogger } from '@/utils/logger';
 
 export const AI_MODELS = [
   'moonshotai/kimi-k2:free',
@@ -208,6 +209,7 @@ export const getBotPersonality = (name: string): BotPersonality => {
 };
 
 let cachedConfig: BotConfig | null = null;
+const logger = createLogger('BotConfig');
 
 export const getBotConfig = (): BotConfig => {
   if (!cachedConfig) {
@@ -222,8 +224,8 @@ export const loadBotConfig = (config: unknown): void => {
   const result = safeValidateBotConfig(config);
 
   if (!result.success) {
-    console.error('Bot configuration validation failed:');
-    console.error(result.error.pretty);
+    logger.error('Bot configuration validation failed:');
+    logger.error(result.error.pretty);
     throw new Error(`Invalid bot configuration:\n${result.error.pretty}`);
   }
 

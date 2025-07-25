@@ -6,6 +6,7 @@ import type {
 } from '@twurple/eventsub-base';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
 import type { TokenManager } from './token.service';
+import { createLogger } from '@/utils/logger';
 
 interface TokenData {
   accessToken: string;
@@ -18,6 +19,7 @@ export class StreamService {
   private readonly apiClient: ApiClient;
   private readonly channelUserId: string;
   private readonly eventSubListener: EventSubWsListener;
+  private logger = createLogger('StreamService');
 
   private constructor(
     apiClient: ApiClient,
@@ -102,7 +104,7 @@ export class StreamService {
 
       return false;
     } catch (error) {
-      console.error('❌ Error checking stream status:', error);
+      this.logger.error({ err: error }, '❌ Error checking stream status');
       return false;
     }
   }
