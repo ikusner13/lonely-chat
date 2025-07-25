@@ -34,11 +34,9 @@ export class App {
     this.messageWindow = new ChatMessageWindow();
     this.queue = new ChatbotQueue();
 
-    // Create bots based on configuration
     this.logger.info('🤖 Creating bots from configuration...');
     const config = getBotConfig();
-    
-    // Create all bots concurrently
+
     await Promise.all(
       BOTS.map(async (botName) => {
         try {
@@ -58,16 +56,17 @@ export class App {
             this.logger.info(`✅ Created bot: ${botName}`);
           }
         } catch (error) {
-          this.logger.error({ err: error }, `❌ Failed to create bot: ${botName}`);
+          this.logger.error(
+            { err: error },
+            `❌ Failed to create bot: ${botName}`
+          );
           throw error;
         }
       })
     );
 
-    // Create chat listener (but don't start yet)
     this.chatListener = new ChatListenerService();
 
-    // Get channel token for stream service
     const channelToken = await this.tokenManager.getChannelToken();
     if (!channelToken) {
       throw new Error(
@@ -75,7 +74,6 @@ export class App {
       );
     }
 
-    // Stream lifecycle - this is what controls everything
     this.logger.info('📡 Setting up stream monitoring...');
     this.stream = await StreamService.create({
       clientId: env.TWITCH_CLIENT_ID,
@@ -93,58 +91,80 @@ export class App {
       },
     });
 
-    // Check if stream is already online
     const isOnline = await this.stream.isStreamOnline();
     if (isOnline) {
       this.logger.info('🟢 Stream is already online, connecting bots...');
       this.connectAll();
     } else {
-      this.logger.info('⏸️  Stream is offline, waiting for stream to go online...');
+      this.logger.info(
+        '⏸️  Stream is offline, waiting for stream to go online...'
+      );
     }
 
     this.logger.info('✅ App started successfully!');
   }
 
   private async handleIncomingMessage(msg: ChatMessage) {
-    // Add to context window
     this.messageWindow.addMessage(msg);
 
-    // Don't process messages from our own bots
-    if (BOTS.includes(msg.user.toLowerCase() as BotName)) {
+    if (await this.shouldModerateMessage(msg)) {
+      this.timeoutUser(msg);
       return;
     }
 
-    // Check moderation first
-    const shouldModerate = await this.checkModeration(msg);
-    if (shouldModerate) {
-      this.queue.addMessage('neckbearddiscordmod', async () => {
-        await this.moderatorBot.timeout({
-          chatMessage: msg,
-          duration: 60,
-          reason: 'Violated community guidelines',
-        });
-        this.moderatorBot.say(
-          `${msg.user} has been timed out for inappropriate behavior`
-        );
+    const botsToRespond = this.determineRespondingBots(msg);
+    this.queueBotResponses(botsToRespond, msg);
+  }
+
+  private shouldModerateMessage(msg: ChatMessage): Promise<boolean> {
+    return this.checkModeration(msg);
+  }
+
+  private timeoutUser(msg: ChatMessage): void {
+    this.queue.addMessage('neckbearddiscordmod', async () => {
+      await this.moderatorBot.timeout({
+        chatMessage: msg,
+        duration: 60,
+        reason: 'Violated community guidelines',
       });
-      return;
-    }
+      this.moderatorBot.say(
+        `${msg.user} has been timed out for inappropriate behavior`
+      );
+    });
+  }
 
-    // Check which bots should respond
+  private determineRespondingBots(msg: ChatMessage): BotName[] {
     const botsToRespond: BotName[] = [];
 
     for (const [botName] of this.bots) {
-      // Check if bot is mentioned
-      if (msg.message.toLowerCase().includes(`@${botName.toLowerCase()}`)) {
-        botsToRespond.push(botName);
+      if (this.isBotOwnMessage(msg, botName)) {
+        continue;
       }
-      // Or if bot should randomly respond (only if no mentions)
-      else if (botsToRespond.length === 0 && Math.random() < 0.25) {
+
+      if (this.isBotMentioned(msg, botName)) {
+        botsToRespond.push(botName);
+      } else if (this.shouldBotRandomlyRespond(botsToRespond)) {
         botsToRespond.push(botName);
       }
     }
 
-    // Queue responses for all bots that should respond
+    return botsToRespond;
+  }
+
+  private isBotOwnMessage(msg: ChatMessage, botName: BotName): boolean {
+    return msg.user.toLowerCase() === botName.toLowerCase();
+  }
+
+  private isBotMentioned(msg: ChatMessage, botName: BotName): boolean {
+    return msg.message.toLowerCase().includes(`@${botName.toLowerCase()}`);
+  }
+
+  private shouldBotRandomlyRespond(botsAlreadyResponding: BotName[]): boolean {
+    const RANDOM_RESPONSE_CHANCE = 0.25;
+    return botsAlreadyResponding.length === 0 && Math.random() < RANDOM_RESPONSE_CHANCE;
+  }
+
+  private queueBotResponses(botsToRespond: BotName[], msg: ChatMessage): void {
     for (const botName of botsToRespond) {
       const bot = this.bots.get(botName);
 
@@ -153,7 +173,6 @@ export class App {
         continue;
       }
 
-      // Queue AI generation + response
       this.queue.addMessage(botName, async () => {
         try {
           const response = await this.ai.generateResponse({
@@ -165,7 +184,10 @@ export class App {
             bot.say(response);
           }
         } catch (error) {
-          this.logger.error({ err: error }, `Error generating response for ${botName}`);
+          this.logger.error(
+            { err: error },
+            `Error generating response for ${botName}`
+          );
         }
       });
     }

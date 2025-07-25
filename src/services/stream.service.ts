@@ -5,8 +5,8 @@ import type {
   EventSubStreamOnlineEvent,
 } from '@twurple/eventsub-base';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
-import type { TokenManager } from './token.service';
 import { createLogger } from '@/utils/logger';
+import type { TokenManager } from './token.service';
 
 interface TokenData {
   accessToken: string;
@@ -31,7 +31,6 @@ export class StreamService {
     this.eventSubListener = eventSubListener;
   }
 
-
   static async create({
     clientId,
     clientSecret,
@@ -49,7 +48,6 @@ export class StreamService {
     onStreamOnline: (event: EventSubStreamOnlineEvent) => void;
     onStreamOffline: (event: EventSubStreamOfflineEvent) => void;
   }): Promise<StreamService> {
-    // Setup auth provider
     const authProvider = new RefreshingAuthProvider({
       clientId,
       clientSecret,
@@ -72,10 +70,8 @@ export class StreamService {
       obtainmentTimestamp: channelToken.obtainmentTimestamp || Date.now(),
     });
 
-    // Create API client
     const apiClient = new ApiClient({ authProvider });
 
-    // Setup EventSub listener
     const eventSubListener = new EventSubWsListener({
       apiClient,
     });
@@ -84,12 +80,7 @@ export class StreamService {
     eventSubListener.onStreamOffline(channelUserId, onStreamOffline);
     eventSubListener.start();
 
-    // Create service instance
-    return new StreamService(
-      apiClient,
-      channelUserId,
-      eventSubListener
-    );
+    return new StreamService(apiClient, channelUserId, eventSubListener);
   }
 
   async isStreamOnline(): Promise<boolean> {

@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateObject, generateText } from 'ai';
+import { generateObject, generateText, type ModelMessage } from 'ai';
 import { type BotName, getBotPersonality } from '@/config/bot.schema';
 import { env } from '@/env';
 import '@/config/bots';
@@ -26,24 +26,16 @@ export class AIService {
     try {
       const personality = getBotPersonality(botName);
 
-      const messages: Array<{
-        role: 'user' | 'assistant';
-        content: string;
-      }> = [];
+      const messages: ModelMessage[] = [];
 
-      // Add context messages if provided
       if (context && context.length > 0) {
-        // Add context messages with proper roles
         for (const msg of context) {
-          // Check if this message is from the current bot
           if (msg.user.toLowerCase() === botName.toLowerCase()) {
-            // Bot's own messages are marked as assistant
             messages.push({
               role: 'assistant' as const,
               content: msg.message,
             });
           } else {
-            // Other messages (users and other bots) are marked as user
             messages.push({
               role: 'user' as const,
               content: `${msg.user}: ${msg.message}`,
@@ -52,13 +44,11 @@ export class AIService {
         }
       }
 
-      // Add the current trigger message with the user who sent it
       messages.push({
         role: 'user' as const,
         content: triggerMessage,
       });
 
-      // Generate response using the AI model
       const result = await generateText({
         model: this.openrouter.chat(personality.model, {
           models: [],
@@ -71,7 +61,10 @@ export class AIService {
 
       return result.text;
     } catch (error) {
-      this.logger.error({ err: error }, `Error generating AI response for ${botName}`);
+      this.logger.error(
+        { err: error },
+        `Error generating AI response for ${botName}`
+      );
       return null;
     }
   }
