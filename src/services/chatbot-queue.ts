@@ -16,8 +16,13 @@ export class ChatbotQueue {
 
   addMessage(botName: BotName, messageAction: () => Promise<void>): void {
     this.mainQueue.add(() => {
-      const botQueue =
-        this.botQueues.get(botName) ?? new PQueue({ concurrency: 1 });
+      // Get existing queue or create new one
+      const botQueue = this.botQueues.get(botName) ?? new PQueue({ concurrency: 1 });
+      
+      // Store it if it's new
+      if (!this.botQueues.has(botName)) {
+        this.botQueues.set(botName, botQueue);
+      }
 
       botQueue.add(async () => {
         await this.randomDelay(this.minDelay, this.maxDelay);

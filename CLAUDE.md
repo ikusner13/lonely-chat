@@ -8,9 +8,10 @@ goal: twitch bots to solve loneliness
 
 - AI-powered bots with distinct personalities that engage naturally in Twitch chat
 - Uses Vercel AI SDK v5 with OpenRouter for diverse model support
-- Supports multiple bots that participate as regular chat members
-- Currently configured for single bot operation but ready for multi-bot scaling
-- Bots respond to chat messages, mentions, and randomly participate in conversations
+- Multiple bots that participate as regular chat members
+- Single chat listener reads all messages; bots are write-only
+- Bots respond to mentions (@botname) and randomly participate (25% chance)
+- Includes moderation bot with timeout capabilities
 
 ## Key Technologies
 
@@ -44,38 +45,46 @@ Currently, no test, lint, or build commands are configured. Bun executes TypeScr
 
 ## Project Structure
 
-- `/src/index.ts` - Main entry point that bootstraps the application
-- `/src/app-bootstrapper.ts` - Initializes all services and wires dependencies
-- `/src/multi-bot-orchestrator-v2.ts` - Pure orchestration logic for bot coordination
-- `/src/services/message-router.service.ts` - Routes messages and schedules bot responses
-- `/src/services/stream-lifecycle-manager.service.ts` - Manages stream state and bot connections
+- `/src/index.ts` - Main entry point that creates and starts the App coordinator
+- `/src/app.ts` - Simple coordinator that wires all services together
+- `/src/services/chat-listener.service.ts` - Single source for reading all chat messages
+- `/src/services/chat-message-window.ts` - Maintains sliding window of chat context for AI
+- `/src/services/chatbot-queue.ts` - Manages response concurrency and natural delays
 - `/src/services/ai.service.ts` - AI integration using Vercel AI SDK and OpenRouter
-- `/src/services/chatbot.service.ts` - Twitch chat client wrapper
-- `/src/services/eventsub.service.ts` - Twitch EventSub for stream online/offline events
-- `/src/services/stream.service.ts` - Stream status monitoring
+- `/src/services/chatbot.service.ts` - Write-only Twitch chat clients for each bot
+- `/src/services/moderatorbot.service.ts` - Special bot with moderation capabilities
+- `/src/services/stream.service.ts` - Stream status monitoring and lifecycle events
+- `/src/services/token.service.ts` - Manages bot and channel OAuth tokens
 - `/tokens.json` - Stores OAuth tokens for channel and bots
 
 ## Architecture Notes
 
+### Message Flow
+
+1. **ChatListenerService** reads ALL chat messages (single source of truth)
+2. **ChatMessageWindow** maintains sliding context window (10 messages, 10 min expiry)
+3. **App coordinator** decides which bots should respond (mentions or 25% random)
+4. **AIService** generates responses using bot personality + chat context
+5. **ChatbotQueue** schedules responses with natural delays (1-3 sec)
+6. **ChatbotService** instances send messages (write-only)
+
+### Service Lifecycle
+
+- Services are created but NOT connected on app start
+- StreamService checks if stream is already online
+- When stream online: ChatListener starts, all bots connect
+- When stream offline: ChatListener stops, all bots disconnect, queue clears
+
+### Bot Types
+
+- **Regular Bots**: Write-only, respond to mentions and participate randomly
+- **Moderator Bot**: Special bot with timeout capabilities, sends confirmation messages
+
 ### AI Integration
 
-- **Shared Context**: All bots share a conversation context but interpret it through their personalities
-- **Response Coordination**: Orchestrator prevents response flooding and manages turn-taking
-- **Personality System**: Each bot has configurable personality, model, temperature, and interests
-- **Context Management**: Automatic trimming and cleanup of old conversations
-
-### Bot Behavior
-
-- Responds to direct mentions (@botname)
-- Randomly participates in conversations (25% chance)
-- Natural response delays to feel human-like
-- Treats all chat members equally (doesn't distinguish between bots and users)
-
-### Single vs Multi-Bot
-
-- Single bot: Uses "friendly" personality by default
-- Multi-bot: Bots have different personalities and participate naturally in chat
-- All bots behave as regular chat members without awareness of other bots
+- Each bot has distinct personality, model, temperature settings
+- All bots receive the same chat context from ChatMessageWindow
+- Responses are generated based on bot personality + context
 
 ### Environment Variables Required
 

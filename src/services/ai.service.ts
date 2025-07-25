@@ -15,12 +15,46 @@ export class AIService {
   async generateResponse({
     botName,
     triggerMessage,
+    context,
   }: {
     botName: BotName;
     triggerMessage: string;
+    context?: Array<{ user: string; message: string; role: string }>;
   }): Promise<string | null> {
     try {
       const personality = getBotPersonality(botName);
+
+      const messages: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+      }> = [];
+
+      // Add context messages if provided
+      if (context && context.length > 0) {
+        // Add context messages with proper roles
+        for (const msg of context) {
+          // Check if this message is from the current bot
+          if (msg.user.toLowerCase() === botName.toLowerCase()) {
+            // Bot's own messages are marked as assistant
+            messages.push({
+              role: 'assistant' as const,
+              content: msg.message,
+            });
+          } else {
+            // Other messages (users and other bots) are marked as user
+            messages.push({
+              role: 'user' as const,
+              content: `${msg.user}: ${msg.message}`,
+            });
+          }
+        }
+      }
+
+      // Add the current trigger message with the user who sent it
+      messages.push({
+        role: 'user' as const,
+        content: triggerMessage,
+      });
 
       // Generate response using the AI model
       const result = await generateText({
@@ -28,12 +62,7 @@ export class AIService {
           models: [],
         }),
         system: this.buildSystemPrompt(botName),
-        messages: [
-          {
-            role: 'user',
-            content: triggerMessage,
-          },
-        ],
+        messages,
         temperature: personality.temperature,
         maxOutputTokens: personality.maxTokens,
       });
@@ -101,10 +130,14 @@ export class AIService {
    */
   private buildSystemPrompt(botName: BotName): string {
     const personality = getBotPersonality(botName);
-    return `${personality.systemPrompt}\n\nYou are ${botName}. Remember: 
-- Write ONLY your direct response, no [name]: prefixes
-- Do NOT roleplay as other bots or continue their messages
-- When you see [otherbot]: message, that's just context - don't mimic that format
-- When someone mentions @${botName}, they are talking TO YOU. You ARE ${botName}, so respond accordingly`;
+    return `${personality.systemPrompt}\n\nYou are ${botName}. Critical instructions:
+- All messages you receive are formatted as "username: message content"
+- When you see "@${botName}" in a message, that user is talking directly TO YOU
+- DO NOT write "botname:" or "[botname]:" or any username prefix in your responses
+- Write ONLY your direct response, as if naturally speaking in chat
+- Your messages are automatically sent from your ${botName} account
+- Do NOT roleplay as other users or bots
+- When you see "othername: message", that's just showing who said what - don't copy this format
+- Respond naturally as yourself without any prefixes or identifiers`;
   }
 }
