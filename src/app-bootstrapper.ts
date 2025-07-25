@@ -5,9 +5,9 @@ import { AIServiceWithTools } from './services/ai-with-tools.service';
 import { BotManager } from './services/bot-manager.service';
 import { ConversationManager } from './services/conversation.service';
 import { MessageRouter } from './services/message-router.service';
-import { StreamService } from './services/stream.service';
-import { StreamLifecycleManager } from './services/stream-lifecycle-manager.service';
 import { TokenManager } from './services/token.service';
+import { StreamService } from './services-new/stream.service';
+import { StreamLifecycleManager } from './services-new/stream-lifecycle-manager.service';
 
 export interface ServiceContainer {
   tokenManager: TokenManager;
@@ -114,12 +114,19 @@ export class AppBootstrapper {
     );
 
     // Initialize stream service
-    const streamService = new StreamService(
-      env.TWITCH_CLIENT_ID,
-      env.TWITCH_CLIENT_SECRET,
-      env.TWITCH_CHANNEL_NAME
-    );
-    await streamService.initialize(tokens.channel);
+    const streamService = await StreamService.create({
+      clientId: env.TWITCH_CLIENT_ID,
+      clientSecret: env.TWITCH_CLIENT_SECRET,
+      channelUserId: env.TWITCH_CHANNEL_ID,
+      tokenManager,
+      channelToken: tokens.channel,
+      onStreamOnline: (event) => {
+        console.log(`Stream online: ${event.broadcasterDisplayName}`);
+      },
+      onStreamOffline: (event) => {
+        console.log(`Stream offline: ${event.broadcasterDisplayName}`);
+      }
+    });
 
     // Initialize stream lifecycle manager
     const streamLifecycleManager = new StreamLifecycleManager(

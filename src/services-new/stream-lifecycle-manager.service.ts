@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { env } from '@/env';
-import type { BotManager } from './bot-manager.service';
+import type { BotManager } from '../services/bot-manager.service';
+import type { TokenData, TokenManager } from '../services/token.service';
 import { EventSubService } from './eventsub.service';
 import type { StreamService } from './stream.service';
-import type { TokenData, TokenManager } from './token.service';
 
 export interface StreamLifecycleEvents {
   'stream:online': (broadcasterName: string) => void;
