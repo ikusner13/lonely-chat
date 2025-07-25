@@ -3,6 +3,7 @@
   "scripts": {
     "dev:hot": "dotenv -e .env -- bun run --hot src/index.ts",
     "dev": "dotenv -e .env -- bun run src/index.ts",
+    "auth": "dotenv -e .env -- bun run auth/index.tsx",
     "generate-token": "dotenv -e .env -- bun run scripts/generate-tokens.ts",
     "generate-channel-token": "dotenv -e .env -- bun run scripts/generate-channel-token.ts",
     "generate-moderator-token": "dotenv -e .env -- bun run scripts/generate-moderator-token.ts",
@@ -25,6 +26,7 @@
     "ai": "5.0.0-beta.25",
     "arctic": "^3.7.0",
     "hono": "^4.8.5",
+    "localtunnel": "^2.0.2",
     "open": "^10.2.0",
     "p-queue": "^8.1.0",
     "pino": "^9.7.0",
@@ -35,6 +37,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
     "@types/bun": "latest",
+    "@types/localtunnel": "^2.0.4",
     "dotenv-cli": "^9.0.0",
     "typescript": "^5.8.3",
     "ultracite": "5.0.49"

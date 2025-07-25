@@ -29,11 +29,19 @@ goal: twitch bots to solve loneliness
 # Install dependencies
 bun install
 
-# Generate channel token (for EventSub)
-bun run generate-channel-token
+# Generate all tokens via unified auth server (NEW - RECOMMENDED)
+bun run auth
+# This opens a dashboard where you can:
+# - Generate channel token for EventSub
+# - Generate bot tokens with chat permissions
+# - Generate moderator bot tokens with mod permissions
+# - View all existing tokens and their status
+# - Refresh expired tokens
 
-# Generate bot tokens
-bun run generate-bot-token <bot-name>
+# Legacy token generation (still available)
+bun run generate-channel-token
+bun run generate-token <bot-name>
+bun run generate-moderator-token <bot-name>
 
 # Run the bot orchestrator
 bun run dev

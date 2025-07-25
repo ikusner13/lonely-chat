@@ -150,7 +150,10 @@ export class TokenManager {
           this.logger.info(`🗑️ Cleaned up token file for ${botName}`);
         }
       } catch (error) {
-        this.logger.error({ err: error }, `Failed to clean up token file for ${botName}`);
+        this.logger.error(
+          { err: error },
+          `Failed to clean up token file for ${botName}`
+        );
       }
     }
 

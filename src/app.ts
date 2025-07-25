@@ -161,7 +161,10 @@ export class App {
 
   private shouldBotRandomlyRespond(botsAlreadyResponding: BotName[]): boolean {
     const RANDOM_RESPONSE_CHANCE = 0.25;
-    return botsAlreadyResponding.length === 0 && Math.random() < RANDOM_RESPONSE_CHANCE;
+    return (
+      botsAlreadyResponding.length === 0 &&
+      Math.random() < RANDOM_RESPONSE_CHANCE
+    );
   }
 
   private queueBotResponses(botsToRespond: BotName[], msg: ChatMessage): void {

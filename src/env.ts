@@ -11,6 +11,10 @@ export const env = createEnv({
       .url()
       .optional()
       .default('https://0wvvnjxz-8080.use.devtunnels.ms/callback'),
+    LOCALTUNNEL_SUBDOMAIN: z
+      .string()
+      .min(1)
+      .describe('Stable subdomain for localtunnel (e.g., my-twitch-auth)'),
     OPENROUTER_KEY: z.string().min(1),
     DISABLE_EVENTSUB: z
       .string()
