@@ -230,8 +230,6 @@ export const loadBotConfig = (config: unknown): void => {
   cachedConfig = result.data;
 };
 
-export const ALL_BOT_NAMES = BotNameSchema.options;
-
 export const getSchemaMetadata = <T extends z.ZodType>(schema: T) => {
   return schema.meta();
 };
