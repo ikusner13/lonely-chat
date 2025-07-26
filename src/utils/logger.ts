@@ -2,10 +2,17 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import pino from 'pino';
 
-// Ensure logs directory exists
-const logsDir = join(process.cwd(), 'logs', 'app');
-if (!existsSync(logsDir)) {
-  mkdirSync(logsDir, { recursive: true });
+// Determine if we're in production
+const isProduction = process.env.NODE_ENV === 'production';
+const logLevel = process.env.LOG_LEVEL || 'info';
+
+// Only create logs directory if not in production
+let logsDir: string | undefined;
+if (!isProduction) {
+  logsDir = join(process.cwd(), 'logs', 'app');
+  if (!existsSync(logsDir)) {
+    mkdirSync(logsDir, { recursive: true });
+  }
 }
 
 // Get date string for log files
@@ -14,28 +21,28 @@ const getDateString = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
-// Determine if we're in production
-const isProduction = process.env.NODE_ENV === 'production';
-const logLevel = process.env.LOG_LEVEL || 'info';
-
 // Configure transports
-const transports = {
-  targets: [
-    // Console transport
-    {
-      target: isProduction ? 'pino/file' : 'pino-pretty',
-      options: isProduction
-        ? { destination: 1 } // stdout
-        : {
-            colorize: true,
-            translateTime: 'SYS:HH:MM:ss.l',
-            ignore: 'pid,hostname',
-            messageFormat: '{msg}',
-            errorLikeObjectKeys: ['err', 'error'],
-            errorProps: '*',
-          },
-      level: logLevel,
-    },
+const targets: pino.TransportTargetOptions[] = [
+  // Console transport
+  {
+    target: isProduction ? 'pino/file' : 'pino-pretty',
+    options: isProduction
+      ? { destination: 1 } // stdout
+      : {
+          colorize: true,
+          translateTime: 'SYS:HH:MM:ss.l',
+          ignore: 'pid,hostname',
+          messageFormat: '{msg}',
+          errorLikeObjectKeys: ['err', 'error'],
+          errorProps: '*',
+        },
+    level: logLevel,
+  },
+];
+
+// Only add file transports if not in production
+if (!isProduction && logsDir) {
+  targets.push(
     // File transport for all logs
     {
       target: 'pino/file',
@@ -53,9 +60,11 @@ const transports = {
         mkdir: true,
       },
       level: 'error',
-    },
-  ],
-} as const;
+    }
+  );
+}
+
+const transports = { targets } as const;
 
 // Create base logger
 export const logger = pino({

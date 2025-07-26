@@ -9,3 +9,6 @@ tokens.json
 
 # logs
 logs/
+
+# build
+dist/

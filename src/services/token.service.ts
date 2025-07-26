@@ -1,5 +1,6 @@
 import type { AccessToken } from '@twurple/auth';
 import { createLogger } from '@/utils/logger';
+import { TokenStoreService } from './token-store.service';
 
 export interface TokenData {
   accessToken: string;
@@ -24,48 +25,122 @@ export interface BotTokenFormat {
 }
 
 export class TokenManager {
-  private readonly mainTokenPath: string;
-  private tokenCache: TokenStorage | null = null;
-  private botTokenPaths: Map<string, string> = new Map();
+  private tokenStore: TokenStoreService;
   private logger = createLogger('TokenManager');
+  private botTokenPaths: Map<string, string> = new Map();
 
-  constructor(mainTokenPath = './tokens.json') {
-    this.mainTokenPath = mainTokenPath;
+  constructor(dbPath = './tokens.db') {
+    this.tokenStore = new TokenStoreService(dbPath);
   }
 
-  async loadTokens(): Promise<TokenStorage> {
-    const file = Bun.file(this.mainTokenPath);
-    if (!(await file.exists())) {
-      throw new Error(`Token file not found: ${this.mainTokenPath}`);
+  loadTokens(): TokenStorage {
+    const allTokens = this.tokenStore.getAllTokens();
+    const channelToken = this.tokenStore.getChannelToken();
+
+    const storage: TokenStorage = {
+      bots: {},
+    };
+
+    if (channelToken) {
+      storage.channel = {
+        ...channelToken,
+        accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        savedAt: new Date().toISOString(),
+        scope: [],
+      };
     }
 
-    const data = await file.text();
-    this.tokenCache = JSON.parse(data) as TokenStorage;
-    return this.tokenCache;
-  }
-
-  async saveTokens(tokens: TokenStorage): Promise<void> {
-    this.tokenCache = tokens;
-    await Bun.write(this.mainTokenPath, JSON.stringify(tokens, null, 2));
-  }
-
-  async getChannelToken(): Promise<TokenData | undefined> {
-    if (!this.tokenCache) {
-      await this.loadTokens();
+    for (const [botName, token] of allTokens) {
+      if (botName !== 'channel') {
+        storage.bots[botName] = {
+          ...token,
+          accessTokenExpiresAt: new Date(
+            Date.now() + 3600 * 1000
+          ).toISOString(),
+          savedAt: new Date().toISOString(),
+          scope: [],
+        };
+      }
     }
-    return this.tokenCache?.channel;
+
+    return storage;
   }
 
-  async getBotTokens(): Promise<Record<string, TokenData>> {
-    if (!this.tokenCache) {
-      await this.loadTokens();
+  saveTokens(tokens: TokenStorage): void {
+    // Save channel token
+    if (tokens.channel) {
+      this.tokenStore.saveToken(
+        'channel',
+        tokens.channel.accessToken,
+        tokens.channel.refreshToken,
+        'channel',
+        new Date(tokens.channel.accessTokenExpiresAt),
+        tokens.channel.userId
+      );
     }
-    return this.tokenCache?.bots || {};
+
+    // Save bot tokens
+    for (const [botName, tokenData] of Object.entries(tokens.bots)) {
+      this.tokenStore.saveToken(
+        botName,
+        tokenData.accessToken,
+        tokenData.refreshToken,
+        'bot',
+        new Date(tokenData.accessTokenExpiresAt),
+        tokenData.userId
+      );
+    }
   }
 
-  async getBotToken(botName: string): Promise<TokenData | undefined> {
-    const tokens = await this.getBotTokens();
-    return tokens[botName];
+  getChannelToken(): TokenData | undefined {
+    const token = this.tokenStore.getChannelToken();
+    if (!token) {
+      return;
+    }
+
+    return {
+      ...token,
+      accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      savedAt: new Date().toISOString(),
+      scope: [],
+      userId: token.userId,
+    };
+  }
+
+  getBotTokens(): Record<string, TokenData> {
+    const allTokens = this.tokenStore.getAllTokens();
+    const bots: Record<string, TokenData> = {};
+
+    for (const [botName, token] of allTokens) {
+      if (botName !== 'channel') {
+        bots[botName] = {
+          ...token,
+          accessTokenExpiresAt: new Date(
+            Date.now() + 3600 * 1000
+          ).toISOString(),
+          savedAt: new Date().toISOString(),
+          scope: [],
+          userId: token.userId,
+        };
+      }
+    }
+
+    return bots;
+  }
+
+  getBotToken(botName: string): TokenData | undefined {
+    const token = this.tokenStore.getToken(botName);
+    if (!token) {
+      return;
+    }
+
+    return {
+      ...token,
+      accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      savedAt: new Date().toISOString(),
+      scope: [],
+      userId: token.userId,
+    };
   }
 
   async createBotTokenFile(botName: string): Promise<string> {
@@ -89,36 +164,50 @@ export class TokenManager {
   }
 
   async updateChannelToken(updatedToken: Partial<TokenData>): Promise<void> {
-    if (!this.tokenCache) {
-      await this.loadTokens();
+    const current = await this.getChannelToken();
+    if (!current) {
+      throw new Error('No channel token to update');
     }
 
-    if (this.tokenCache?.channel) {
-      this.tokenCache.channel = {
-        ...this.tokenCache.channel,
-        ...updatedToken,
-        savedAt: new Date().toISOString(),
-      };
-      await this.saveTokens(this.tokenCache);
-    }
+    const merged = {
+      ...current,
+      ...updatedToken,
+      savedAt: new Date().toISOString(),
+    };
+
+    this.tokenStore.saveToken(
+      'channel',
+      merged.accessToken,
+      merged.refreshToken,
+      'channel',
+      new Date(merged.accessTokenExpiresAt),
+      merged.userId
+    );
   }
 
   async updateBotToken(
     botName: string,
     updatedToken: Partial<TokenData>
   ): Promise<void> {
-    if (!this.tokenCache) {
-      await this.loadTokens();
+    const current = await this.getBotToken(botName);
+    if (!current) {
+      throw new Error(`No token found for bot: ${botName}`);
     }
 
-    if (this.tokenCache?.bots[botName]) {
-      this.tokenCache.bots[botName] = {
-        ...this.tokenCache.bots[botName],
-        ...updatedToken,
-        savedAt: new Date().toISOString(),
-      };
-      await this.saveTokens(this.tokenCache);
-    }
+    const merged = {
+      ...current,
+      ...updatedToken,
+      savedAt: new Date().toISOString(),
+    };
+
+    this.tokenStore.saveToken(
+      botName,
+      merged.accessToken,
+      merged.refreshToken,
+      'bot',
+      new Date(merged.accessTokenExpiresAt),
+      merged.userId
+    );
   }
 
   // Helper to convert Twurple AccessToken to our TokenData format
@@ -158,5 +247,10 @@ export class TokenManager {
     }
 
     this.botTokenPaths.clear();
+  }
+
+  // Close database connection
+  close(): void {
+    this.tokenStore.close();
   }
 }

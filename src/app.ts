@@ -29,7 +29,9 @@ export class App {
     this.logger.info('🚀 Starting Twitch Bot App...');
 
     // Initialize core services
-    this.tokenManager = new TokenManager();
+    this.tokenManager = new TokenManager(
+      process.env.TOKEN_DB_PATH || './tokens.db'
+    );
     this.ai = new AIService();
     this.messageWindow = new ChatMessageWindow();
     this.queue = new ChatbotQueue();
@@ -67,7 +69,7 @@ export class App {
 
     this.chatListener = new ChatListenerService();
 
-    const channelToken = await this.tokenManager.getChannelToken();
+    const channelToken = this.tokenManager.getChannelToken();
     if (!channelToken) {
       throw new Error(
         'Channel token not found. Run: bun run generate-channel-token'

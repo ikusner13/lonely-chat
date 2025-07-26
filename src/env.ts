@@ -14,7 +14,8 @@ export const env = createEnv({
     LOCALTUNNEL_SUBDOMAIN: z
       .string()
       .min(1)
-      .describe('Stable subdomain for localtunnel (e.g., my-twitch-auth)'),
+      .describe('Stable subdomain for localtunnel (e.g., my-twitch-auth)')
+      .optional(),
     OPENROUTER_KEY: z.string().min(1),
     DISABLE_EVENTSUB: z
       .string()
