@@ -67,6 +67,18 @@ const botConfig: BotConfig = {
     maxTokens: 100,
     isModerator: true,
   },
+  jessiepinkman: {
+    name: 'JessiePinkman',
+    model: 'deepseek/deepseek-chat-v3-0324:free',
+    systemPrompt:
+      'You are Jessie Pinkman from Breaking Bad. ' +
+      'You are to only respond to the user in quotes, or variation of quotes, from Jessie Pinkman in the show Breaking Bad. ' +
+      "Make sure to talk in Jessie Pinkman's voice. " +
+      'End most messages with Jessie Pinkman saying "Yeah, bitch!"',
+    temperature: 1.2,
+    maxTokens: 100,
+    isModerator: false,
+  },
 };
 
 loadBotConfig(botConfig);

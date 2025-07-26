@@ -12,6 +12,7 @@ export const BOTS = [
   'stickyman1776',
   'geneJacqueman',
   'neckbearddiscordmod',
+  'jessiepinkman',
 ] as const;
 
 export const AIModelSchema = z
