@@ -6,6 +6,9 @@ node_modules/
 
 # tokens
 tokens.json
+tokens.db
+tokens.db-shm
+tokens.db-wal
 
 # logs
 logs/

@@ -60,62 +60,6 @@ botRoutes.get('/new', (c) => {
   );
 });
 
-// Refresh existing bot token
-botRoutes.get('/:name', async (c) => {
-  const botName = c.req.param('name');
-  const authUrl = generateAuthUrl('bot', botName);
-
-  try {
-    const tokens = await tokenManager.loadTokens();
-    const existingToken = tokens.bots[botName];
-
-    if (!existingToken) {
-      return c.html(
-        <Layout title="Bot Not Found">
-          <div class="error">
-            <h2>Bot Not Found</h2>
-            <p>No token found for bot: {botName}</p>
-            <a class="button" href="/">
-              Back to Dashboard
-            </a>
-          </div>
-        </Layout>
-      );
-    }
-
-    return c.html(
-      <Layout title={`Refresh Bot Token: ${botName}`}>
-        <div class="card">
-          <h2>Refresh Bot Token: {botName}</h2>
-          <p style="margin-bottom: 1rem;">
-            Current token for <strong>{botName}</strong> expires at:{' '}
-            {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
-          </p>
-          <p style="margin-bottom: 1rem;">
-            Click below to generate a new token.
-          </p>
-          <a class="button" href={authUrl}>
-            Refresh Bot Token
-          </a>
-        </div>
-      </Layout>
-    );
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to load bot token');
-    return c.html(
-      <Layout title="Error Loading Token">
-        <div class="error">
-          <h2>Error Loading Token</h2>
-          <p>Failed to load token information.</p>
-          <a class="button" href="/">
-            Back to Dashboard
-          </a>
-        </div>
-      </Layout>
-    );
-  }
-});
-
 // Handle OAuth callback
 botRoutes.get('/callback', async (c) => {
   const code = c.req.query('code');
@@ -144,7 +88,7 @@ botRoutes.get('/callback', async (c) => {
     const userInfo = await getUserInfo(tokenData.accessToken);
 
     // Load existing tokens
-    const storage = await tokenManager.loadTokens();
+    const storage = tokenManager.loadTokens();
 
     // Save bot token
     storage.bots[botName] = {
@@ -154,7 +98,7 @@ botRoutes.get('/callback', async (c) => {
       channelName: userInfo.username,
     };
 
-    await tokenManager.saveTokens(storage);
+    tokenManager.saveTokens(storage);
 
     logger.info(
       {
@@ -206,6 +150,62 @@ botRoutes.get('/callback', async (c) => {
               Back to Dashboard
             </a>
           </div>
+        </div>
+      </Layout>
+    );
+  }
+});
+
+// Refresh existing bot token
+botRoutes.get('/:name', (c) => {
+  const botName = c.req.param('name');
+  const authUrl = generateAuthUrl('bot', botName);
+
+  try {
+    const tokens = tokenManager.loadTokens();
+    const existingToken = tokens.bots[botName];
+
+    if (!existingToken) {
+      return c.html(
+        <Layout title="Bot Not Found">
+          <div class="error">
+            <h2>Bot Not Found</h2>
+            <p>No token found for bot: {botName}</p>
+            <a class="button" href="/">
+              Back to Dashboard
+            </a>
+          </div>
+        </Layout>
+      );
+    }
+
+    return c.html(
+      <Layout title={`Refresh Bot Token: ${botName}`}>
+        <div class="card">
+          <h2>Refresh Bot Token: {botName}</h2>
+          <p style="margin-bottom: 1rem;">
+            Current token for <strong>{botName}</strong> expires at:{' '}
+            {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
+          </p>
+          <p style="margin-bottom: 1rem;">
+            Click below to generate a new token.
+          </p>
+          <a class="button" href={authUrl}>
+            Refresh Bot Token
+          </a>
+        </div>
+      </Layout>
+    );
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to load bot token');
+    return c.html(
+      <Layout title="Error Loading Token">
+        <div class="error">
+          <h2>Error Loading Token</h2>
+          <p>Failed to load token information.</p>
+          <a class="button" href="/">
+            Back to Dashboard
+          </a>
         </div>
       </Layout>
     );

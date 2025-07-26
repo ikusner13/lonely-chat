@@ -8,14 +8,14 @@ export const env = createEnv({
     TWITCH_REDIRECT_URI: z
       .url()
       .optional()
-      .default('http://localhost:8080/callback'),
+      .default('https://lonelybot.loca.lt/callback'),
     LOCALTUNNEL_SUBDOMAIN: z
       .string()
       .min(1)
       .describe('Stable subdomain for localtunnel (e.g., my-twitch-auth)')
       .optional(),
     PORT: z.string().default('8080'),
-    TOKEN_DB_PATH: z.string().default('/data/tokens.db'),
+    TOKEN_DB_PATH: z.string().default('./tokens.db'),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

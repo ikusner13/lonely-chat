@@ -9,7 +9,7 @@ import type { TokenManager } from './token.service';
 
 export class BotManager {
   private bots: Map<string, ChatbotService> = new Map();
-  private moderatorBot!: ModeratorBotService;
+  private moderatorBot: ModeratorBotService | undefined;
   private logger = createLogger('BotManager');
 
   async initialize(
@@ -25,8 +25,10 @@ export class BotManager {
   }
 
   async connectAll(ai: AIService): Promise<void> {
-    // Connect moderator bot
-    await this.moderatorBot.setupAndConnect(ai);
+    // Connect moderator bot if it exists
+    if (this.moderatorBot) {
+      await this.moderatorBot.setupAndConnect(ai);
+    }
 
     // Connect regular bots
     for (const [name, bot] of this.bots) {
@@ -36,9 +38,11 @@ export class BotManager {
   }
 
   disconnectAll(): void {
-    // Disconnect moderator bot
-    this.moderatorBot.leaveChannel();
-    this.logger.info('👮 Moderator bot disconnected');
+    // Disconnect moderator bot if it exists
+    if (this.moderatorBot) {
+      this.moderatorBot.leaveChannel();
+      this.logger.info('👮 Moderator bot disconnected');
+    }
 
     // Disconnect regular bots
     for (const [name, bot] of this.bots) {
@@ -48,7 +52,9 @@ export class BotManager {
   }
 
   handleMessage(msg: ChatMessage): void {
-    this.moderatorBot.handleMessage(msg);
+    if (this.moderatorBot) {
+      this.moderatorBot.handleMessage(msg);
+    }
   }
 
   getBots(): Map<string, ChatbotService> {

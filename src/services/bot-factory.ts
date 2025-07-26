@@ -11,7 +11,7 @@ export async function createAllBots(
   configManager: ConfigManager
 ): Promise<{
   bots: Map<string, ChatbotService>;
-  moderatorBot: ModeratorBotService;
+  moderatorBot: ModeratorBotService | undefined;
 }> {
   logger.info('🤖 Creating bots from configuration...');
   const botConfigs = configManager.getBots();
@@ -47,10 +47,6 @@ export async function createAllBots(
       }
     })
   );
-
-  if (!moderatorBot) {
-    throw new Error('No moderator bot configured');
-  }
 
   return { bots, moderatorBot };
 }

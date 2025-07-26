@@ -74,62 +74,6 @@ moderatorRoutes.get('/new', (c) => {
   );
 });
 
-// Refresh existing moderator token
-moderatorRoutes.get('/:name', async (c) => {
-  const botName = c.req.param('name');
-  const authUrl = generateAuthUrl('moderator', botName);
-
-  try {
-    const tokens = await tokenManager.loadTokens();
-    const existingToken = tokens.bots[botName];
-
-    if (!existingToken) {
-      return c.html(
-        <Layout title="Bot Not Found">
-          <div class="error">
-            <h2>Bot Not Found</h2>
-            <p>No token found for moderator bot: {botName}</p>
-            <a class="button" href="/">
-              Back to Dashboard
-            </a>
-          </div>
-        </Layout>
-      );
-    }
-
-    return c.html(
-      <Layout title={`Refresh Moderator Token: ${botName}`}>
-        <div class="card">
-          <h2>Refresh Moderator Token: {botName}</h2>
-          <p style="margin-bottom: 1rem;">
-            Current token for <strong>{botName}</strong> expires at:{' '}
-            {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
-          </p>
-          <p style="margin-bottom: 1rem;">
-            This bot has moderator privileges. Click below to refresh the token.
-          </p>
-          <a class="button" href={authUrl}>
-            Refresh Moderator Token
-          </a>
-        </div>
-      </Layout>
-    );
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to load moderator token');
-    return c.html(
-      <Layout title="Error Loading Token">
-        <div class="error">
-          <h2>Error Loading Token</h2>
-          <p>Failed to load token information.</p>
-          <a class="button" href="/">
-            Back to Dashboard
-          </a>
-        </div>
-      </Layout>
-    );
-  }
-});
-
 // Handle OAuth callback
 moderatorRoutes.get('/callback', async (c) => {
   const code = c.req.query('code');
@@ -166,7 +110,7 @@ moderatorRoutes.get('/callback', async (c) => {
     const userInfo = await getUserInfo(tokenData.accessToken);
 
     // Load existing tokens
-    const storage = await tokenManager.loadTokens();
+    const storage = tokenManager.loadTokens();
 
     // Save moderator bot token
     storage.bots[botName] = {
@@ -176,7 +120,7 @@ moderatorRoutes.get('/callback', async (c) => {
       channelName: userInfo.username,
     };
 
-    await tokenManager.saveTokens(storage);
+    tokenManager.saveTokens(storage);
 
     logger.info(
       {
@@ -248,6 +192,62 @@ moderatorRoutes.get('/callback', async (c) => {
               Back to Dashboard
             </a>
           </div>
+        </div>
+      </Layout>
+    );
+  }
+});
+
+// Refresh existing moderator token
+moderatorRoutes.get('/:name', (c) => {
+  const botName = c.req.param('name');
+  const authUrl = generateAuthUrl('moderator', botName);
+
+  try {
+    const tokens = tokenManager.loadTokens();
+    const existingToken = tokens.bots[botName];
+
+    if (!existingToken) {
+      return c.html(
+        <Layout title="Bot Not Found">
+          <div class="error">
+            <h2>Bot Not Found</h2>
+            <p>No token found for moderator bot: {botName}</p>
+            <a class="button" href="/">
+              Back to Dashboard
+            </a>
+          </div>
+        </Layout>
+      );
+    }
+
+    return c.html(
+      <Layout title={`Refresh Moderator Token: ${botName}`}>
+        <div class="card">
+          <h2>Refresh Moderator Token: {botName}</h2>
+          <p style="margin-bottom: 1rem;">
+            Current token for <strong>{botName}</strong> expires at:{' '}
+            {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
+          </p>
+          <p style="margin-bottom: 1rem;">
+            This bot has moderator privileges. Click below to refresh the token.
+          </p>
+          <a class="button" href={authUrl}>
+            Refresh Moderator Token
+          </a>
+        </div>
+      </Layout>
+    );
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to load moderator token');
+    return c.html(
+      <Layout title="Error Loading Token">
+        <div class="error">
+          <h2>Error Loading Token</h2>
+          <p>Failed to load token information.</p>
+          <a class="button" href="/">
+            Back to Dashboard
+          </a>
         </div>
       </Layout>
     );
