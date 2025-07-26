@@ -121,6 +121,8 @@ Each object in the array must have:
         maxOutputTokens: personality.maxTokens,
       });
 
+      this.logger.info({ moderationResults: object }, 'Moderation results');
+
       return object;
     } catch (error) {
       this.logger.error(

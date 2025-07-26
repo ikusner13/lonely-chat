@@ -157,6 +157,8 @@ export class ModeratorBotService extends EventEmitter<{
   private processQueue(): void {
     const messages = this.modMessageQueue_;
 
+    this.logger.info({ messages }, 'Processing queue');
+
     if (messages.length === 0) {
       return;
     }

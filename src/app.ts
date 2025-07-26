@@ -105,7 +105,7 @@ export class App {
   }
 
   private handleIncomingMessage(msg: ChatMessage) {
-    this.logger.debug({ msg }, 'Received message');
+    this.logger.debug({ chatMessage: msg }, 'Received message');
     this.messageWindow.addMessage(msg);
 
     const botsToRespond = this.determineRespondingBots(msg);
@@ -180,6 +180,8 @@ export class App {
   private async connectAll() {
     // Wire up message handler
     this.chatListener.on('message', (msg) => {
+      this.logger.info({ chatMessage: msg }, 'Received message');
+
       if (this.moderatorBot.canTimeoutUser(msg.role)) {
         this.moderatorBot.addToQueue(msg);
       }
@@ -217,12 +219,21 @@ export class App {
     await Promise.all(botConnections);
 
     this.moderatorBot.on('moderate', async (messages) => {
+      this.logger.info({ messages }, 'Moderation queue received');
+
       const moderationResults = await this.ai.generateModerationResponse({
         moderatorBotName: 'neckbearddiscordmod',
         messages,
       });
 
+      this.logger.info({ moderationResults }, 'Moderation results');
+
       if (!moderationResults) {
+        return;
+      }
+
+      if (moderationResults.violations.length === 0) {
+        this.logger.info('No violations found');
         return;
       }
 
