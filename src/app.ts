@@ -61,11 +61,13 @@ export class App {
   }
 
   private async connectAll() {
-    this.chatListener.start((msg) => {
+    // Set up message listeners
+    this.chatListener.on('message', (msg) => {
       this.botManager.handleMessage(msg);
       this.responseCoordinator.handleIncomingMessage(msg);
     });
 
+    this.chatListener.start();
     await this.botManager.connectAll(this.ai);
   }
 

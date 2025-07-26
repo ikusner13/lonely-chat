@@ -31,11 +31,8 @@ export class ChatListenerService extends EventEmitter<{
     });
   }
 
-  start(onMessage: (msg: ChatMessage) => void): void {
+  start(): void {
     this.logger.info('👂 Chat listener started');
-
-    this.on('message', onMessage);
-
     this.client.connect();
     this.handleMessage();
   }
@@ -43,6 +40,7 @@ export class ChatListenerService extends EventEmitter<{
   stop(): void {
     this.logger.info('🔇 Chat listener stopped');
     this.client.quit();
+    this.removeAllListeners('message');
   }
 
   private handleMessage(): void {
