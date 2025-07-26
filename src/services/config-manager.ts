@@ -1,4 +1,4 @@
-import { existsSync, watch } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { EventEmitter } from 'tseep';
 import { createLogger } from '@/utils/logger';
 
@@ -23,7 +23,6 @@ export class ConfigManager extends EventEmitter<{
 }> {
   private config: ConfigFile | null = null;
   private configPath: string;
-  private watcher: ReturnType<typeof watch> | undefined;
   private logger = createLogger('ConfigManager');
 
   constructor(configPath?: string) {
@@ -34,7 +33,7 @@ export class ConfigManager extends EventEmitter<{
 
   async initialize(): Promise<void> {
     await this.loadConfig();
-    this.setupWatcher();
+    // Removed file watcher - causes issues with volume mounts in production
   }
 
   async loadConfig(): Promise<void> {
@@ -82,34 +81,10 @@ export class ConfigManager extends EventEmitter<{
     }
   }
 
-  private setupWatcher(): void {
-    // Check if file exists before watching
-    if (!existsSync(this.configPath)) {
-      this.logger.warn(
-        `Config file ${this.configPath} does not exist - skipping file watcher`
-      );
-      return;
-    }
-
-    try {
-      this.watcher = watch(this.configPath, async (eventType) => {
-        if (eventType === 'change') {
-          this.logger.info('Config changed, reloading...');
-          await this.loadConfig();
-          // Just emit that config updated - let consumers figure out what to do
-          this.emit('config:updated');
-        }
-      });
-      this.logger.info(`Watching config file: ${this.configPath}`);
-    } catch (error) {
-      this.logger.error({ err: error }, 'Failed to setup config watcher');
-    }
-  }
+  // Removed setupWatcher method - file watching causes issues with volume mounts
 
   destroy(): void {
-    if (this.watcher) {
-      this.watcher.close();
-    }
+    // No cleanup needed since file watcher was removed
   }
 
   // Simple getters - consumers can call these after update event
