@@ -1,6 +1,7 @@
 import { RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
 import type { BotName } from '@/config/bot.schema';
+import { getBotConfig } from '@/config/bot.schema';
 import { env } from '@/env';
 import type { TokenManager } from './token.service';
 
@@ -79,5 +80,14 @@ export class ChatbotService {
 
   leaveChannel(): void {
     this.bot.quit();
+  }
+
+  connectAndIntroduce(): void {
+    this.joinChannel();
+
+    const botConfig = getBotConfig();
+    const botPersonality = botConfig[this.botName_];
+
+    this.say(botPersonality.introMessage ?? '👋');
   }
 }

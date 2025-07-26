@@ -1,8 +1,10 @@
 import { ApiClient } from '@twurple/api';
 import { EventEmitter } from 'tseep';
 import type { BotName } from '@/config/bot.schema';
+import { getBotConfig } from '@/config/bot.schema';
 import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
+import type { AIService } from './ai.service';
 import type { ChatMessage, Role } from './chat-listener.service';
 import { ChatbotService } from './chatbot.service';
 import type { TokenManager } from './token.service';
@@ -73,6 +75,8 @@ export class ModeratorBotService extends EventEmitter<{
   }
 
   leaveChannel(): void {
+    this.logger.info('👮 Moderator bot leaving channel');
+    this.stopQueueCheckInterval();
     this.chatbot.leaveChannel();
   }
 
@@ -141,6 +145,7 @@ export class ModeratorBotService extends EventEmitter<{
   }
 
   stopQueueCheckInterval(): void {
+    this.logger.info('👮 Moderator bot moderation queue stopped');
     clearInterval(this.queueCheckIntervalId);
   }
 
@@ -166,5 +171,47 @@ export class ModeratorBotService extends EventEmitter<{
     this.emit('moderate', messages);
 
     this.clearQueue();
+  }
+
+  async setupAndConnect(ai: AIService): Promise<void> {
+    await this.joinChannel();
+
+    const botConfig = getBotConfig();
+    const moderatorBot = botConfig.neckbearddiscordmod;
+
+    this.say(moderatorBot.introMessage ?? '👋');
+
+    this.on('moderate', async (messages) => {
+      const moderationResults = await ai.generateModerationResponse({
+        moderatorBotName: 'neckbearddiscordmod',
+        messages,
+      });
+
+      if (!moderationResults || moderationResults.violations.length === 0) {
+        return;
+      }
+
+      await Promise.all(
+        moderationResults.violations.map((result) => {
+          const chatMessage = messages.find((m) => m.user === result.user);
+
+          if (!chatMessage) {
+            return Promise.resolve();
+          }
+
+          return this.timeout({
+            user: result.user,
+            duration: result.duration,
+            reason: result.reason,
+          });
+        })
+      );
+    });
+  }
+
+  handleMessage(msg: ChatMessage): void {
+    if (this.canTimeoutUser(msg.role)) {
+      this.addToQueue(msg);
+    }
   }
 }

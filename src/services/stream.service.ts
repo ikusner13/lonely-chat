@@ -1,19 +1,8 @@
 import { ApiClient } from '@twurple/api';
 import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
-import type {
-  EventSubStreamOfflineEvent,
-  EventSubStreamOnlineEvent,
-} from '@twurple/eventsub-base';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
 import { createLogger } from '@/utils/logger';
 import type { TokenManager } from './token.service';
-
-interface TokenData {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn?: number;
-  obtainmentTimestamp?: number;
-}
 
 export class StreamService {
   private readonly apiClient: ApiClient;
@@ -31,23 +20,27 @@ export class StreamService {
     this.eventSubListener = eventSubListener;
   }
 
-  static async create({
+  static async createAndMonitor({
     clientId,
     clientSecret,
     channelUserId,
     tokenManager,
-    channelToken,
-    onStreamOnline,
-    onStreamOffline,
+    onConnect,
+    onDisconnect,
   }: {
     clientId: string;
     clientSecret: string;
     channelUserId: string;
     tokenManager: TokenManager;
-    channelToken: TokenData;
-    onStreamOnline: (event: EventSubStreamOnlineEvent) => void;
-    onStreamOffline: (event: EventSubStreamOfflineEvent) => void;
+    onConnect: () => void | Promise<void>;
+    onDisconnect: () => void;
   }): Promise<StreamService> {
+    const channelToken = tokenManager.getChannelToken();
+    if (!channelToken) {
+      throw new Error(
+        'Channel token not found. Run: bun run generate-channel-token'
+      );
+    }
     const authProvider = new RefreshingAuthProvider({
       clientId,
       clientSecret,
@@ -66,8 +59,8 @@ export class StreamService {
     await authProvider.addUserForToken({
       accessToken: channelToken.accessToken,
       refreshToken: channelToken.refreshToken,
-      expiresIn: channelToken.expiresIn || null,
-      obtainmentTimestamp: channelToken.obtainmentTimestamp || Date.now(),
+      expiresIn: null,
+      obtainmentTimestamp: Date.now(),
     });
 
     const apiClient = new ApiClient({ authProvider });
@@ -76,11 +69,36 @@ export class StreamService {
       apiClient,
     });
 
-    eventSubListener.onStreamOnline(channelUserId, onStreamOnline);
-    eventSubListener.onStreamOffline(channelUserId, onStreamOffline);
+    const logger = createLogger('StreamService');
+
+    eventSubListener.onStreamOnline(channelUserId, async () => {
+      logger.info('🟢 Stream is online! Connecting bots...');
+      await onConnect();
+    });
+
+    eventSubListener.onStreamOffline(channelUserId, () => {
+      logger.info('🔴 Stream is offline! Disconnecting bots...');
+      onDisconnect();
+    });
+
     eventSubListener.start();
 
-    return new StreamService(apiClient, channelUserId, eventSubListener);
+    const service = new StreamService(
+      apiClient,
+      channelUserId,
+      eventSubListener
+    );
+
+    // Check if stream is already online
+    const isOnline = await service.isStreamOnline();
+    if (isOnline) {
+      logger.info('🟢 Stream is already online, connecting bots...');
+      await onConnect();
+    } else {
+      logger.info('⏸️  Stream is offline, waiting for stream to go online...');
+    }
+
+    return service;
   }
 
   async isStreamOnline(): Promise<boolean> {

@@ -1,6 +1,7 @@
 import { ChatClient, type ChatUser } from '@twurple/chat';
 import { EventEmitter } from 'tseep';
 import { env } from '@/env';
+import { createLogger } from '@/utils/logger';
 
 export const ROLES = {
   moderator: 'moderator',
@@ -20,6 +21,7 @@ export class ChatListenerService extends EventEmitter<{
   message: (message: ChatMessage) => void;
 }> {
   private readonly client: ChatClient;
+  private readonly logger = createLogger('ChatListenerService');
 
   constructor() {
     super();
@@ -29,13 +31,17 @@ export class ChatListenerService extends EventEmitter<{
     });
   }
 
-  start(): void {
-    this.client.connect();
+  start(onMessage: (msg: ChatMessage) => void): void {
+    this.logger.info('👂 Chat listener started');
 
+    this.on('message', onMessage);
+
+    this.client.connect();
     this.handleMessage();
   }
 
   stop(): void {
+    this.logger.info('🔇 Chat listener stopped');
     this.client.quit();
   }
 
