@@ -7,7 +7,7 @@ services:
       - TWITCH_CHANNEL_ID=${TWITCH_CHANNEL_ID}
       - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
       - OPENROUTER_KEY=${OPENROUTER_KEY}
-      - TOKEN_DB_PATH=/data/tokens.db
+      - TOKEN_JSON_PATH=/data/tokens.json
       - BOT_CONFIG_PATH=/config/bots.toml
     volumes:
       - bot-data:/data

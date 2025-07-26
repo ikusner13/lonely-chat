@@ -1,6 +1,7 @@
 import type { AccessToken } from '@twurple/auth';
 import { createLogger } from '@/utils/logger';
-import { TokenStoreService } from './token-store.service';
+// import { TokenStoreService } from './token-store.service';
+import { TokenJsonStoreService } from './token-json-store.service';
 
 export interface TokenData {
   accessToken: string;
@@ -25,12 +26,12 @@ export interface BotTokenFormat {
 }
 
 export class TokenManager {
-  private tokenStore: TokenStoreService;
+  private tokenStore: TokenJsonStoreService;
   private logger = createLogger('TokenManager');
   private botTokenPaths: Map<string, string> = new Map();
 
-  constructor(dbPath = process.env.TOKEN_DB_PATH || '/data/tokens.db') {
-    this.tokenStore = new TokenStoreService(dbPath);
+  constructor(filePath = process.env.TOKEN_JSON_PATH || '/data/tokens.json') {
+    this.tokenStore = new TokenJsonStoreService(filePath);
   }
 
   loadTokens(): TokenStorage {

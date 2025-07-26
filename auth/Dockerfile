@@ -18,13 +18,13 @@ COPY --from=install /temp/dev/node_modules node_modules
 COPY package.json .
 COPY tsconfig.json .
 COPY auth/ auth/
-COPY src/services/token-store.service.ts src/services/
+COPY src/services/token-json-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
 COPY src/utils/logger.ts src/utils/
 
 # set production environment
 ENV NODE_ENV=production
-ENV TOKEN_DB_PATH=/data/tokens.db
+ENV TOKEN_JSON_PATH=/data/tokens.json
 
 # run the app as root to avoid permission issues with mounted volumes
 # USER bun
