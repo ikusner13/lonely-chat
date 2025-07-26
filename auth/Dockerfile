@@ -21,7 +21,6 @@ COPY auth/ auth/
 COPY src/services/token-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
 COPY src/utils/logger.ts src/utils/
-COPY src/env.ts src/
 
 # Create directory for database with proper permissions
 RUN mkdir -p /data && chown bun:bun /data

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { env } from '@/env';
+import { env } from './env';
 import { TokenManager } from '@/services/token.service';
 import { createLogger } from '@/utils/logger';
 // Import components
