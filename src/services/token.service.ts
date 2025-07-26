@@ -29,7 +29,7 @@ export class TokenManager {
   private logger = createLogger('TokenManager');
   private botTokenPaths: Map<string, string> = new Map();
 
-  constructor(dbPath = './tokens.db') {
+  constructor(dbPath = process.env.TOKEN_DB_PATH || '/data/tokens.db') {
     this.tokenStore = new TokenStoreService(dbPath);
   }
 

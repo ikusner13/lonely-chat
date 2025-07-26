@@ -15,7 +15,7 @@ interface TokenRecord {
 export class TokenStoreService {
   private db: Database;
 
-  constructor(dbPath = './tokens.db') {
+  constructor(dbPath = process.env.TOKEN_DB_PATH || '/data/tokens.db') {
     this.db = new Database(dbPath, { create: true });
     this.initDatabase();
   }
