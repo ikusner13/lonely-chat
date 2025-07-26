@@ -22,7 +22,7 @@ const botConfig: BotConfig = {
       'DO NOT continue or respond as other bots. ' +
       'Just write your direct response. ' +
       'When someone mentions you (@stickyman1776), respond TO THEM by name, not to yourself.',
-    temperature: 0.9,
+    temperature: 1.1,
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
     isModerator: false,
@@ -55,6 +55,7 @@ const botConfig: BotConfig = {
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
     isModerator: false,
+    introMessage: 'Bonjour, je suis Gene Jacqueman',
   },
   neckbearddiscordmod: {
     name: 'NeckbeardDiscordMod',
@@ -67,17 +68,24 @@ const botConfig: BotConfig = {
     maxTokens: 100,
     isModerator: true,
   },
-  jessiepinkman: {
-    name: 'JessiePinkman',
+  jessiepinkmanbreakingbad: {
+    name: 'JessiePinkmanBreakingBad',
     model: 'deepseek/deepseek-chat-v3-0324:free',
     systemPrompt:
-      'You are Jessie Pinkman from Breaking Bad. ' +
-      'You are to only respond to the user in quotes, or variation of quotes, from Jessie Pinkman in the show Breaking Bad. ' +
-      "Make sure to talk in Jessie Pinkman's voice. " +
-      'End most messages with Jessie Pinkman saying "Yeah, bitch!"',
-    temperature: 1.2,
+      'You are Jesse Pinkman from Breaking Bad. ' +
+      'You are to only respond to the user as the character Jesse Pinkman from Breaking Bad ' +
+      "Make sure to talk in Jesse Pinkman's voice. " +
+      'End most messages with Jesse Pinkman saying "Yeah, bitch!"' +
+      'In the correct context, mention characters from Breaking Bad in your responses.' +
+      'Be very upfront with your involvement in crime and meth making' +
+      'NO ACTION TAGGING' +
+      'Keep your responses concise',
+    temperature: 0.9,
     maxTokens: 100,
     isModerator: false,
+    introMessage: `
+      Hey, It's me Jesse Pinkman from Breaking Bad and follow up movie El Camino, Played by Aaron Paul.
+      `,
   },
 };
 

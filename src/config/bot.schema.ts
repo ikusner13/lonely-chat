@@ -6,13 +6,14 @@ export const AI_MODELS = [
   'deepseek/deepseek-chat-v3-0324:free',
   'mistralai/mistral-nemo:free',
   'moonshotai/kimi-k2',
+  'cognitivecomputations/dolphin-mistral-24b-venice-edition:free',
 ] as const;
 
 export const BOTS = [
   'stickyman1776',
   'geneJacqueman',
   'neckbearddiscordmod',
-  'jessiepinkman',
+  'jessiepinkmanbreakingbad',
 ] as const;
 
 export const AIModelSchema = z
@@ -90,6 +91,12 @@ export const BotPersonalitySchema = z
       .boolean()
       .default(false)
       .describe('Whether this bot has moderator privileges'),
+    introMessage: z
+      .string({
+        error: 'Intro message must be a string',
+      })
+      .optional()
+      .describe('Message to send when the bot joins a channel'),
   })
   .refine(
     (data) => {

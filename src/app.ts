@@ -195,64 +195,59 @@ export class App {
 
     // Connect all bots
     await this.moderatorBot.joinChannel();
+    const botConfig = getBotConfig();
+
     this.logger.info('👮 Moderator bot connected');
     // Send intro message for moderator bot
     setTimeout(() => {
-      this.moderatorBot.say('👋');
+      const moderatorBot = botConfig.neckbearddiscordmod;
+      this.moderatorBot.say(moderatorBot.introMessage ?? '👋');
     }, 1000);
 
-    // Connect all bots in parallel
-    const botConnections = Array.from(this.bots.entries()).map(
-      async ([name, bot], index) => {
-        await bot.joinChannel();
-        this.logger.info(`🤖 Bot ${name} connected`);
-        // Send intro message for each bot with a slight delay
-        setTimeout(
-          () => {
-            bot.say('👋');
-          },
-          1000 + index * 500
-        );
-      }
-    );
+    for (const [name, bot] of this.bots) {
+      bot.joinChannel();
+      this.logger.info(`🤖 Bot ${name} connected`);
 
-    await Promise.all(botConnections);
+      const botPersonality = botConfig[name];
 
-    this.moderatorBot.on('moderate', async (messages) => {
-      this.logger.info({ messages }, 'Moderation queue received');
+      bot.say(botPersonality.introMessage ?? '👋');
+    }
 
-      const moderationResults = await this.ai.generateModerationResponse({
-        moderatorBotName: 'neckbearddiscordmod',
-        messages,
-      });
+    // this.moderatorBot.on('moderate', async (messages) => {
+    //   this.logger.info({ messages }, 'Moderation queue received');
 
-      this.logger.info({ moderationResults }, 'Moderation results');
+    //   const moderationResults = await this.ai.generateModerationResponse({
+    //     moderatorBotName: 'neckbearddiscordmod',
+    //     messages,
+    //   });
 
-      if (!moderationResults) {
-        return;
-      }
+    //   this.logger.info({ moderationResults }, 'Moderation results');
 
-      if (moderationResults.violations.length === 0) {
-        this.logger.info('No violations found');
-        return;
-      }
+    //   if (!moderationResults) {
+    //     return;
+    //   }
 
-      await Promise.all(
-        moderationResults.violations.map((result) => {
-          const chatMessage = messages.find((m) => m.user === result.user);
+    //   if (moderationResults.violations.length === 0) {
+    //     this.logger.info('No violations found');
+    //     return;
+    //   }
 
-          if (!chatMessage) {
-            return Promise.resolve();
-          }
+    //   await Promise.all(
+    //     moderationResults.violations.map((result) => {
+    //       const chatMessage = messages.find((m) => m.user === result.user);
 
-          return this.moderatorBot.timeout({
-            user: result.user,
-            duration: result.duration,
-            reason: result.reason,
-          });
-        })
-      );
-    });
+    //       if (!chatMessage) {
+    //         return Promise.resolve();
+    //       }
+
+    //       return this.moderatorBot.timeout({
+    //         user: result.user,
+    //         duration: result.duration,
+    //         reason: result.reason,
+    //       });
+    //     })
+    //   );
+    // });
   }
 
   private disconnectAll() {
