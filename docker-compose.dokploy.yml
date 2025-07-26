@@ -27,12 +27,16 @@ services:
       - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
       - OPENROUTER_KEY=${OPENROUTER_KEY}
       - TOKEN_DB_PATH=/data/tokens.db
-      - BOT_CONFIG_PATH=../files/bots.toml
+      - BOT_CONFIG_PATH=/bots.toml
     volumes:
       - tokens-data:/data
+      - ../files/bots.toml:/bots.toml:ro
       # Note: In Dokploy, use Advanced → Mounts → Add File Mount
-      # Mount Path: /bots.toml (Dokploy will mount it to ../files/bots.toml)
-      # Upload your config/bots.toml file
+      # 1. Go to Advanced → Mounts
+      # 2. Create a new File Mount
+      # 3. Name it: bots.toml
+      # 4. Add your bots.toml content
+      # The file will be created at /files/bots.toml and mounted to /bots.toml
     depends_on:
       - auth-server
     restart: unless-stopped
