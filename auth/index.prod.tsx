@@ -3,8 +3,8 @@ import { env } from '@/env';
 import { TokenManager } from '@/services/token.service';
 import { createLogger } from '@/utils/logger';
 // Import components
-import { Dashboard } from './components/Dashboard';
-import { Layout } from './components/Layout';
+import { Dashboard } from './components/dashboard';
+import { Layout } from './components/layout';
 import { botRoutes } from './routes/bot';
 // Import routes
 import { channelRoutes } from './routes/channel';

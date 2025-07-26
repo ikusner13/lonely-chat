@@ -2,6 +2,9 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
+# Install curl for healthcheck (lighter than wget)
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 # install dependencies into temp directory
 FROM base AS install
 RUN mkdir -p /temp/dev

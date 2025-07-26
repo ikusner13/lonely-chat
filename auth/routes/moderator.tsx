@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { TokenManager } from '@/services/token.service';
 import { createLogger } from '@/utils/logger';
-import { Layout } from '../components/Layout';
+import { Layout } from '../components/layout';
 import {
   exchangeCodeForTokens,
   generateAuthUrl,
