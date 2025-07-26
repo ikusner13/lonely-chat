@@ -12,7 +12,11 @@ import { moderatorRoutes } from './routes/moderator';
 
 const app = new Hono();
 const logger = createLogger('AuthServer');
-const tokenManager = new TokenManager();
+const tokenManager = new TokenManager({
+  clientId: env.TWITCH_CLIENT_ID,
+  clientSecret: env.TWITCH_CLIENT_SECRET,
+  dbPath: env.TOKEN_DB_PATH,
+});
 
 // Health check endpoint
 app.get('/health', (c) => c.text('OK', 200));

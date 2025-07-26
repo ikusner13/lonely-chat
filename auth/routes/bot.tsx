@@ -7,10 +7,15 @@ import {
   generateAuthUrl,
   getUserInfo,
 } from '../lib/oauth';
+import { env } from '../env';
 
 const botRoutes = new Hono();
 const logger = createLogger('BotAuth');
-const tokenManager = new TokenManager();
+const tokenManager = new TokenManager({
+  clientId: env.TWITCH_CLIENT_ID,
+  clientSecret: env.TWITCH_CLIENT_SECRET,
+  dbPath: env.TOKEN_DB_PATH,
+});
 
 // Start bot auth flow
 botRoutes.get('/new', (c) => {

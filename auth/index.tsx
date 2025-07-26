@@ -13,7 +13,11 @@ import { moderatorRoutes } from './routes/moderator';
 
 const app = new Hono();
 const logger = createLogger('AuthServer');
-const tokenManager = new TokenManager();
+const tokenManager = new TokenManager({
+  clientId: env.TWITCH_CLIENT_ID,
+  clientSecret: env.TWITCH_CLIENT_SECRET,
+  dbPath: env.TOKEN_DB_PATH,
+});
 
 // Global state for tunnel URL
 let tunnelUrl: string | null = null;

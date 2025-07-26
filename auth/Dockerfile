@@ -20,6 +20,7 @@ COPY tsconfig.json .
 COPY auth/ auth/
 COPY src/services/token-json-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
+COPY src/services/sqlite-token-store.ts src/services/
 COPY src/utils/logger.ts src/utils/
 
 # set production environment

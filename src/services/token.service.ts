@@ -1,5 +1,4 @@
 import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
-import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
 import { SQLiteTokenStore } from './sqlite-token-store';
 
@@ -18,23 +17,34 @@ export interface TokenStorage {
   bots: Record<string, TokenData>;
 }
 
+export interface TokenManagerConfig {
+  clientId: string;
+  clientSecret: string;
+  dbPath?: string;
+}
+
 export class TokenManager {
   private tokenStore: SQLiteTokenStore;
   private authProviders = new Map<string, RefreshingAuthProvider>();
   private userIds = new Map<string, string>();
   private logger = createLogger('TokenManager');
+  private clientId: string;
+  private clientSecret: string;
 
-  constructor(dbPath?: string) {
-    this.tokenStore = new SQLiteTokenStore(dbPath);
+  constructor(config: TokenManagerConfig) {
+    this.clientId = config.clientId;
+    this.clientSecret = config.clientSecret;
+    this.tokenStore = new SQLiteTokenStore(config.dbPath);
     this.logger.info(
-      `Token database initialized at: ${dbPath || './data/tokens.db'}`
+      `Token database initialized at: ${config.dbPath || './data/tokens.db'}`
     );
   }
 
   async getAuthProvider(name: string): Promise<RefreshingAuthProvider> {
     // Check cache first
-    if (this.authProviders.has(name)) {
-      return this.authProviders.get(name)!;
+    const cachedProvider = this.authProviders.get(name);
+    if (cachedProvider) {
+      return cachedProvider;
     }
 
     // Load from database - sync operation with Bun
@@ -47,14 +57,18 @@ export class TokenManager {
 
     // Create auth provider
     const authProvider = new RefreshingAuthProvider({
-      clientId: env.TWITCH_CLIENT_ID,
-      clientSecret: env.TWITCH_CLIENT_SECRET,
+      clientId: this.clientId,
+      clientSecret: this.clientSecret,
     });
 
     // Set up auto-save on refresh
     authProvider.onRefresh(async (refreshUserId, newTokenData) => {
       // Use atomic refresh for consistency
-      await this.tokenStore.refreshTokenAtomic(name, newTokenData, refreshUserId);
+      await this.tokenStore.refreshTokenAtomic(
+        name,
+        newTokenData,
+        refreshUserId
+      );
       this.logger.info(`Token refreshed and saved for ${name}`);
     });
 
@@ -80,8 +94,9 @@ export class TokenManager {
 
   getUserId(name: string): string | null {
     // Check cache first
-    if (this.userIds.has(name)) {
-      return this.userIds.get(name)!;
+    const cachedUserId = this.userIds.get(name);
+    if (cachedUserId) {
+      return cachedUserId;
     }
 
     // Check database
@@ -135,10 +150,10 @@ export class TokenManager {
     return storage;
   }
 
-  async saveTokens(tokens: TokenStorage): Promise<void> {
+  saveTokens(tokens: TokenStorage): void {
     // Save channel token
     if (tokens.channel) {
-      await this.saveToken(
+      this.saveToken(
         'channel',
         {
           accessToken: tokens.channel.accessToken,
@@ -153,7 +168,7 @@ export class TokenManager {
 
     // Save bot tokens
     for (const [name, tokenData] of Object.entries(tokens.bots)) {
-      await this.saveToken(
+      this.saveToken(
         name,
         {
           accessToken: tokenData.accessToken,

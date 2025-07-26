@@ -1,9 +1,14 @@
 import type { TokenData } from '@/services/token.service';
 import { TokenManager } from '@/services/token.service';
 import { createLogger } from '@/utils/logger';
+import { env } from '../env';
 
 const logger = createLogger('TokenUtils');
-const tokenManager = new TokenManager();
+const tokenManager = new TokenManager({
+  clientId: env.TWITCH_CLIENT_ID,
+  clientSecret: env.TWITCH_CLIENT_SECRET,
+  dbPath: env.TOKEN_DB_PATH,
+});
 
 export interface TokenInfo {
   exists: boolean;

@@ -41,9 +41,11 @@ export class App {
     });
 
     // Core services
-    this.tokenManager = new TokenManager(
-      process.env.TOKEN_DB_PATH || './tokens.db'
-    );
+    this.tokenManager = new TokenManager({
+      clientId: env.TWITCH_CLIENT_ID,
+      clientSecret: env.TWITCH_CLIENT_SECRET,
+      dbPath: process.env.TOKEN_DB_PATH || './tokens.db'
+    });
     this.ai = new AIService();
     this.messageWindow = new ChatMessageWindow();
     const queue = new ChatbotQueue();
