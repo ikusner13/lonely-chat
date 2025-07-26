@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import localtunnel from 'localtunnel';
 import { env } from '@/env';
 import { TokenManager } from '@/services/token.service';
 import { createLogger } from '@/utils/logger';
@@ -15,12 +14,6 @@ const app = new Hono();
 const logger = createLogger('AuthServer');
 const tokenManager = new TokenManager();
 
-// Global state for tunnel URL
-let tunnelUrl: string | null = null;
-let tunnel: localtunnel.Tunnel | null = null;
-
-// Remove jsxRenderer since we're using c.html() directly
-
 // Health check endpoint
 app.get('/health', (c) => c.text('OK', 200));
 
@@ -30,7 +23,7 @@ app.get('/', async (c) => {
     const tokens = await tokenManager.loadTokens();
     return c.html(
       <Layout title="Twitch Bot Authentication">
-        <Dashboard tokens={tokens} tunnelUrl={tunnelUrl} />
+        <Dashboard tokens={tokens} tunnelUrl={null} />
       </Layout>
     );
   } catch (error) {
@@ -145,93 +138,12 @@ app.delete('/tokens/:type/:name?', async (c) => {
   }
 });
 
-// Tunnel status endpoint
-app.get('/tunnel/status', (c) => {
-  return c.json({
-    url: tunnelUrl,
-    status: tunnel ? 'connected' : 'disconnected',
-  });
-});
+// Start server
+const port = Number(process.env.PORT) || 8080;
 
-// Get subdomain from env (required)
-function getSubdomain(): string {
-  return env.LOCALTUNNEL_SUBDOMAIN;
-}
+logger.info(`Starting auth server on port ${port}`);
 
-// Start server with localtunnel
-async function startServer() {
-  const port = 8080;
-  const subdomain = getSubdomain();
-
-  logger.info(`Starting auth server on port ${port}`);
-
-  // Start local server
-  Bun.serve({
-    port,
-    fetch: app.fetch,
-  });
-
-  logger.info(`Local server running at http://localhost:${port}`);
-
-  // Start localtunnel
-  try {
-    logger.info(`Creating tunnel with subdomain: ${subdomain}`);
-    tunnel = await localtunnel({
-      port,
-      subdomain,
-      host: 'https://loca.lt',
-    });
-
-    tunnelUrl = tunnel.url;
-    logger.info(`🌐 Tunnel established at: ${tunnelUrl}`);
-
-    // Update environment if needed
-    if (
-      !env.TWITCH_REDIRECT_URI ||
-      env.TWITCH_REDIRECT_URI.includes('localhost')
-    ) {
-      logger.warn('TWITCH_REDIRECT_URI is not set to tunnel URL');
-      logger.info('Add this to your .env file:');
-      logger.info(`TWITCH_REDIRECT_URI=${tunnelUrl}/callback`);
-    }
-
-    tunnel.on('close', () => {
-      logger.warn('Tunnel closed');
-      tunnelUrl = null;
-    });
-
-    tunnel.on('error', (err: Error) => {
-      logger.error({ err }, 'Tunnel error');
-    });
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to create tunnel');
-    logger.warn('Running without tunnel - OAuth callbacks will not work');
-  }
-
-  // Open browser to dashboard
-  const open = await import('open');
-  await open.default(`http://localhost:${port}`);
-
-  logger.info('✨ Auth server is ready!');
-  logger.info(`Dashboard: http://localhost:${port}`);
-  if (tunnelUrl) {
-    logger.info(`Public URL: ${tunnelUrl}`);
-  }
-}
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  logger.info('Shutting down...');
-  if (tunnel) {
-    tunnel.close();
-  }
-  process.exit(0);
-});
-
-// Start the server
-startServer().catch((error) => {
-  logger.error({ err: error }, 'Failed to start server');
-  process.exit(1);
-});
-
-export default app;
+export default {
+  port,
+  fetch: app.fetch,
+};
