@@ -1,10 +1,14 @@
 import { ApiClient } from '@twurple/api';
 import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
+import { EventEmitter } from 'tseep';
 import { createLogger } from '@/utils/logger';
 import type { TokenManager } from './token.service';
 
-export class StreamService {
+export class StreamService extends EventEmitter<{
+  'stream:online': () => void;
+  'stream:offline': () => void;
+}> {
   private readonly apiClient: ApiClient;
   private readonly channelUserId: string;
   private readonly eventSubListener: EventSubWsListener;
@@ -15,6 +19,7 @@ export class StreamService {
     channelUserId: string,
     eventSubListener: EventSubWsListener
   ) {
+    super();
     this.apiClient = apiClient;
     this.channelUserId = channelUserId;
     this.eventSubListener = eventSubListener;
@@ -25,15 +30,11 @@ export class StreamService {
     clientSecret,
     channelUserId,
     tokenManager,
-    onConnect,
-    onDisconnect,
   }: {
     clientId: string;
     clientSecret: string;
     channelUserId: string;
     tokenManager: TokenManager;
-    onConnect: () => void | Promise<void>;
-    onDisconnect: () => void;
   }): Promise<StreamService> {
     const channelToken = tokenManager.getChannelToken();
     if (!channelToken) {
@@ -69,33 +70,31 @@ export class StreamService {
       apiClient,
     });
 
-    const logger = createLogger('StreamService');
-
-    eventSubListener.onStreamOnline(channelUserId, async () => {
-      logger.info('🟢 Stream is online! Connecting bots...');
-      await onConnect();
-    });
-
-    eventSubListener.onStreamOffline(channelUserId, () => {
-      logger.info('🔴 Stream is offline! Disconnecting bots...');
-      onDisconnect();
-    });
-
-    eventSubListener.start();
-
     const service = new StreamService(
       apiClient,
       channelUserId,
       eventSubListener
     );
 
+    eventSubListener.onStreamOnline(channelUserId, () => {
+      service.logger.info('🟢 Stream is online! Connecting bots...');
+      service.emit('stream:online');
+    });
+
+    eventSubListener.onStreamOffline(channelUserId, () => {
+      service.logger.info('🔴 Stream is offline! Disconnecting bots...');
+      service.emit('stream:offline');
+    });
+
+    eventSubListener.start();
+
     // Check if stream is already online
     const isOnline = await service.isStreamOnline();
     if (isOnline) {
-      logger.info('🟢 Stream is already online, connecting bots...');
-      await onConnect();
+      service.logger.info('🟢 Stream is already online, connecting bots...');
+      service.emit('stream:online');
     } else {
-      logger.info('⏸️  Stream is offline, waiting for stream to go online...');
+      service.logger.info('⏸️  Stream is offline, waiting for stream to go online...');
     }
 
     return service;

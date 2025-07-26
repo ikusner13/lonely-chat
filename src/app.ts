@@ -50,14 +50,15 @@ export class App {
 
   private async connectStream() {
     this.logger.info('📡 Setting up stream monitoring...');
-    await StreamService.createAndMonitor({
+    const streamService = await StreamService.createAndMonitor({
       clientId: env.TWITCH_CLIENT_ID,
       clientSecret: env.TWITCH_CLIENT_SECRET,
       channelUserId: env.TWITCH_CHANNEL_ID,
       tokenManager: this.tokenManager,
-      onConnect: () => this.connectAll(),
-      onDisconnect: () => this.disconnectAll(),
     });
+
+    streamService.on('stream:online', () => this.connectAll());
+    streamService.on('stream:offline', () => this.disconnectAll());
   }
 
   private async connectAll() {
