@@ -31,16 +31,10 @@ COPY --from=install /temp/prod/node_modules node_modules
 COPY --from=prerelease /usr/src/app/dist/index.js .
 COPY --from=prerelease /usr/src/app/package.json .
 
-# Create directory for database with proper permissions
-RUN mkdir -p /data && chown bun:bun /data
-
 # set production environment
 ENV NODE_ENV=production
 
-# Set volume for persistent data
-VOLUME ["/data"]
-
-# run the app
-USER bun
+# run the app as root to avoid permission issues with mounted volumes
+# USER bun
 EXPOSE 3000/tcp
 ENTRYPOINT [ "bun", "run", "index.js" ]

@@ -26,7 +26,7 @@ COPY src/utils/logger.ts src/utils/
 ENV NODE_ENV=production
 ENV TOKEN_DB_PATH=/data/tokens.db
 
-# run the app
-USER bun
+# run the app as root to avoid permission issues with mounted volumes
+# USER bun
 EXPOSE 8080/tcp
 ENTRYPOINT [ "bun", "run", "auth/index.prod.tsx" ]
