@@ -17,21 +17,14 @@ export const Layout: FC<LayoutProps> = ({
         <meta content="width=device-width, initial-scale=1.0" name="viewport" />
         <title>{title}</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" />
-        <style>{`
-          /* Custom utility for centered container */
-          @utility container {
-            margin-inline: auto;
-            padding-inline: 2rem;
-          }
-        `}</style>
       </head>
       <body class="bg-gray-100 text-gray-800">
         <div class="mb-8 bg-purple-600 py-4 text-white shadow-md">
-          <div class="container">
+          <div class="max-w-6xl mx-auto px-8">
             <h1 class="font-bold text-3xl">🎮 {title}</h1>
           </div>
         </div>
-        <div class="container">{children}</div>
+        <div class="max-w-6xl mx-auto px-8">{children}</div>
       </body>
     </html>
   );
