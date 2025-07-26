@@ -1,19 +1,38 @@
 import { ApiClient } from '@twurple/api';
+import { EventEmitter } from 'tseep';
 import type { BotName } from '@/config/bot.schema';
 import { env } from '@/env';
+import { createLogger } from '@/utils/logger';
 import type { ChatMessage, Role } from './chat-listener.service';
 import { ChatbotService } from './chatbot.service';
 import type { TokenManager } from './token.service';
 
-export class ModeratorBotService {
+export class ModeratorBotService extends EventEmitter<{
+  moderate: (messages: ChatMessage[]) => void;
+}> {
   private readonly chatbot: ChatbotService;
   private readonly apiClient: ApiClient;
-  private readonly twitchChannelId = env.TWITCH_CHANNEL_ID;
   private readonly maxTimeoutDuration = 60 * 1000; // 1 minute
 
-  private constructor(chatbot: ChatbotService, apiClient: ApiClient) {
+  private readonly queueCheckInterval = 30_000 as const;
+  private queueCheckIntervalId: NodeJS.Timeout | undefined = undefined;
+  private logger = createLogger('ModeratorBotService');
+
+  private modMessageQueue_: ChatMessage[] = [];
+  private botUserId: string;
+
+  private constructor(
+    chatbot: ChatbotService,
+    apiClient: ApiClient,
+    botUserId: string
+  ) {
+    super();
+
     this.chatbot = chatbot;
     this.apiClient = apiClient;
+    this.botUserId = botUserId;
+
+    this.startQueueCheckInterval();
   }
 
   static async create(
@@ -29,7 +48,19 @@ export class ModeratorBotService {
         authProvider: chatbot.authProvider,
       });
 
-      return new ModeratorBotService(chatbot, apiClient);
+      const tokenData = await tokenManager.getBotToken(botName);
+
+      if (!tokenData) {
+        throw new Error(`Token not found for bot ${botName}`);
+      }
+
+      const botUserId = tokenData.userId;
+
+      if (!botUserId) {
+        throw new Error(`Bot user ID not found for bot ${botName}`);
+      }
+
+      return new ModeratorBotService(chatbot, apiClient, botUserId);
     } catch (error) {
       throw new Error(
         `Failed to create ModeratorBotService: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -37,8 +68,8 @@ export class ModeratorBotService {
     }
   }
 
-  joinChannel(): void {
-    this.chatbot.joinChannel();
+  async joinChannel(): Promise<void> {
+    await this.chatbot.joinChannel();
   }
 
   leaveChannel(): void {
@@ -50,28 +81,36 @@ export class ModeratorBotService {
   }
 
   async timeout({
-    chatMessage,
+    user,
     duration,
     reason,
   }: {
-    chatMessage: ChatMessage;
+    user: string;
     duration: number;
     reason: string;
   }): Promise<void> {
-    const userRole = chatMessage.role;
+    this.logger.info({ user, duration, reason }, 'Timing out user');
 
-    // don't try to timeout moderators or broadcasters
-    if (!this.canTimeoutUser(userRole)) {
-      return;
+    const twitchUser = await this.apiClient.users.getUserByName(user);
+
+    if (!twitchUser) {
+      throw new Error('User not found');
     }
 
-    const user = chatMessage.user;
-
-    await this.apiClient.moderation.banUser(this.twitchChannelId, {
-      user,
-      reason,
-      duration: this.ensureMaxTimeoutDuration(duration),
-    });
+    try {
+      await this.apiClient.asUser(this.botUserId, async (userClient) => {
+        await userClient.moderation.banUser(env.TWITCH_CHANNEL_ID, {
+          user: twitchUser.id,
+          reason,
+          duration: this.ensureMaxTimeoutDuration(duration),
+        });
+      });
+    } catch (error) {
+      this.logger.error(
+        { err: error, user, duration, reason },
+        'Error timing out user'
+      );
+    }
   }
 
   canTimeoutUser(role: Role): boolean {
@@ -84,5 +123,39 @@ export class ModeratorBotService {
 
   isSelf(user: string): boolean {
     return user === this.chatbot.botName;
+  }
+
+  addToQueue(message: ChatMessage): void {
+    this.modMessageQueue_.push(message);
+  }
+
+  get modMessageQueue(): ChatMessage[] {
+    return this.modMessageQueue;
+  }
+
+  stopQueueCheckInterval(): void {
+    clearInterval(this.queueCheckIntervalId);
+  }
+
+  private startQueueCheckInterval(): void {
+    this.queueCheckIntervalId = setInterval(() => {
+      this.processQueue();
+    }, this.queueCheckInterval);
+  }
+
+  private clearQueue(): void {
+    this.modMessageQueue_ = [];
+  }
+
+  private processQueue(): void {
+    const messages = this.modMessageQueue_;
+
+    if (messages.length === 0) {
+      return;
+    }
+
+    this.emit('moderate', messages);
+
+    this.clearQueue();
   }
 }

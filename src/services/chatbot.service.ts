@@ -50,7 +50,7 @@ export class ChatbotService {
 
       const bot = new ChatClient({
         authProvider,
-        channels: [],
+        channels: [env.TWITCH_CHANNEL_NAME],
       });
 
       return new ChatbotService(authProvider, bot, botName);

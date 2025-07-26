@@ -104,33 +104,13 @@ export class App {
     this.logger.info('✅ App started successfully!');
   }
 
-  private async handleIncomingMessage(msg: ChatMessage) {
+  private handleIncomingMessage(msg: ChatMessage) {
+    this.logger.debug({ msg }, 'Received message');
     this.messageWindow.addMessage(msg);
 
-    if (await this.shouldModerateMessage(msg)) {
-      this.timeoutUser(msg);
-      return;
-    }
-
     const botsToRespond = this.determineRespondingBots(msg);
+
     this.queueBotResponses(botsToRespond, msg);
-  }
-
-  private shouldModerateMessage(msg: ChatMessage): Promise<boolean> {
-    return this.checkModeration(msg);
-  }
-
-  private timeoutUser(msg: ChatMessage): void {
-    this.queue.addMessage('neckbearddiscordmod', async () => {
-      await this.moderatorBot.timeout({
-        chatMessage: msg,
-        duration: 60,
-        reason: 'Violated community guidelines',
-      });
-      this.moderatorBot.say(
-        `${msg.user} has been timed out for inappropriate behavior`
-      );
-    });
   }
 
   private determineRespondingBots(msg: ChatMessage): BotName[] {
@@ -183,6 +163,7 @@ export class App {
             triggerMessage: `${msg.user}: ${msg.message}`,
             context: this.messageWindow.messages,
           });
+          this.logger.debug({ response }, 'Generated response');
           if (response) {
             bot.say(response);
           }
@@ -196,39 +177,71 @@ export class App {
     }
   }
 
-  private checkModeration(msg: ChatMessage): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.ai
-        .generateModerationResponse({
-          botName: 'neckbearddiscordmod',
-          triggerMessage: msg.message,
-          triggerUser: msg.user,
-          onModAction: () => resolve(true),
-        })
-        .then(() => resolve(false))
-        .catch((error) => {
-          this.logger.error({ err: error }, 'Error checking moderation');
-          resolve(false); // Don't moderate on error
-        });
-    });
-  }
-
-  private connectAll() {
+  private async connectAll() {
     // Wire up message handler
-    this.chatListener.on('message', (msg) => this.handleIncomingMessage(msg));
+    this.chatListener.on('message', (msg) => {
+      if (this.moderatorBot.canTimeoutUser(msg.role)) {
+        this.moderatorBot.addToQueue(msg);
+      }
+
+      this.handleIncomingMessage(msg);
+    });
 
     // Start listening to chat
     this.chatListener.start();
     this.logger.info('👂 Chat listener started');
 
     // Connect all bots
-    this.moderatorBot.joinChannel();
+    await this.moderatorBot.joinChannel();
     this.logger.info('👮 Moderator bot connected');
+    // Send intro message for moderator bot
+    setTimeout(() => {
+      this.moderatorBot.say('👋');
+    }, 1000);
 
-    for (const [name, bot] of this.bots) {
-      bot.joinChannel();
-      this.logger.info(`🤖 Bot ${name} connected`);
-    }
+    // Connect all bots in parallel
+    const botConnections = Array.from(this.bots.entries()).map(
+      async ([name, bot], index) => {
+        await bot.joinChannel();
+        this.logger.info(`🤖 Bot ${name} connected`);
+        // Send intro message for each bot with a slight delay
+        setTimeout(
+          () => {
+            bot.say('👋');
+          },
+          1000 + index * 500
+        );
+      }
+    );
+
+    await Promise.all(botConnections);
+
+    this.moderatorBot.on('moderate', async (messages) => {
+      const moderationResults = await this.ai.generateModerationResponse({
+        moderatorBotName: 'neckbearddiscordmod',
+        messages,
+      });
+
+      if (!moderationResults) {
+        return;
+      }
+
+      await Promise.all(
+        moderationResults.violations.map((result) => {
+          const chatMessage = messages.find((m) => m.user === result.user);
+
+          if (!chatMessage) {
+            return Promise.resolve();
+          }
+
+          return this.moderatorBot.timeout({
+            user: result.user,
+            duration: result.duration,
+            reason: result.reason,
+          });
+        })
+      );
+    });
   }
 
   private disconnectAll() {
@@ -248,5 +261,8 @@ export class App {
     // Clear any pending messages
     this.queue.stop();
     this.logger.info('🧹 Message queue cleared');
+
+    this.moderatorBot.stopQueueCheckInterval();
+    this.logger.info('👮 Moderator bot moderation queue stopped');
   }
 }

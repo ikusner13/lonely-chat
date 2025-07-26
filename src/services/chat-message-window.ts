@@ -5,13 +5,17 @@ interface ChatMessageWithExpiration extends ChatMessage {
 }
 
 const TEN_MINUTES = 1000 * 60 * 10;
+const MAX_MESSAGES = 10;
 
 export class ChatMessageWindow {
   private readonly messages_: ChatMessageWithExpiration[] = [];
   private readonly maxMessages: number;
   private readonly messageExpirationDuration: number;
 
-  constructor(maxMessages = 10, messageExpirationDuration = TEN_MINUTES) {
+  constructor(
+    maxMessages = MAX_MESSAGES,
+    messageExpirationDuration = TEN_MINUTES
+  ) {
     this.maxMessages = maxMessages;
     this.messageExpirationDuration = messageExpirationDuration;
   }

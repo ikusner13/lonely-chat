@@ -25,6 +25,7 @@ const botConfig: BotConfig = {
     temperature: 0.9,
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
+    isModerator: false,
   },
   geneJacqueman: {
     name: 'GeneJacqueman',
@@ -53,10 +54,11 @@ const botConfig: BotConfig = {
     temperature: 1.0,
     maxTokens: 100,
     fallbackModels: ['mistralai/mistral-nemo:free', 'moonshotai/kimi-k2:free'],
+    isModerator: false,
   },
   neckbearddiscordmod: {
     name: 'NeckbeardDiscordMod',
-    model: 'moonshotai/kimi-k2:free',
+    model: 'deepseek/deepseek-chat-v3-0324:free',
     systemPrompt:
       // Context & Role
       'You are a moderator in this twitch chat. ' +

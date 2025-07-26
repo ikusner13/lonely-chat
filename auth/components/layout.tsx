@@ -20,11 +20,11 @@ export const Layout: FC<LayoutProps> = ({
       </head>
       <body class="bg-gray-100 text-gray-800">
         <div class="mb-8 bg-purple-600 py-4 text-white shadow-md">
-          <div class="max-w-6xl mx-auto px-8">
+          <div class="mx-auto max-w-6xl px-8">
             <h1 class="font-bold text-3xl">🎮 {title}</h1>
           </div>
         </div>
-        <div class="max-w-6xl mx-auto px-8">{children}</div>
+        <div class="mx-auto max-w-6xl px-8">{children}</div>
       </body>
     </html>
   );
