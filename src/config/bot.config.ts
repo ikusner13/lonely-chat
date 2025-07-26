@@ -5,12 +5,12 @@ export const BotSchema = z.object({
   // AI model configuration
   model: z.string().default('deepseek/deepseek-chat-v3-0324:free'),
   fallbackModels: z.array(z.string()).optional(),
-  
+
   // Personality
   systemPrompt: z.string(),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().positive().max(4000).default(100),
-  
+
   // Optional features
   isModerator: z.boolean().default(false),
   introMessage: z.string().optional(),
@@ -71,7 +71,6 @@ export const BOTS = {
     introMessage: "Hey, It's me Jesse Pinkman from Breaking Bad",
   },
 } as const;
-
 
 // Type-safe bot names derived from the config
 export type BotName = keyof typeof BOTS;

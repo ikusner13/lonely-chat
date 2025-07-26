@@ -18,6 +18,7 @@ export class App {
   private tokenManager!: TokenManager;
   private responseCoordinator!: BotResponseCoordinator;
   private configManager!: ConfigManager;
+  private streamService?: StreamService;
   private logger = createLogger('App');
 
   async start() {
@@ -66,15 +67,15 @@ export class App {
 
   private async connectStream() {
     this.logger.info('📡 Setting up stream monitoring...');
-    const streamService = await StreamService.createAndMonitor({
+    this.streamService = await StreamService.createAndMonitor({
       clientId: env.TWITCH_CLIENT_ID,
       clientSecret: env.TWITCH_CLIENT_SECRET,
       channelUserId: env.TWITCH_CHANNEL_ID,
       tokenManager: this.tokenManager,
     });
 
-    streamService.on('stream:online', async () => this.connectAll());
-    streamService.on('stream:offline', () => this.disconnectAll());
+    this.streamService.on('stream:online', async () => this.connectAll());
+    this.streamService.on('stream:offline', () => this.disconnectAll());
   }
 
   private async connectAll() {
@@ -126,27 +127,27 @@ export class App {
 
   async destroy(): Promise<void> {
     this.logger.info('Destroying app services...');
-    
+
     // Stop stream service first
     if (this.streamService) {
       await this.streamService.stop();
     }
-    
+
     // Stop bot manager
     if (this.botManager) {
-      await this.botManager.destroy();
+      this.botManager.destroy();
     }
-    
+
     // Stop response coordinator
     if (this.responseCoordinator) {
-      await this.responseCoordinator.destroy();
+      this.responseCoordinator.destroy();
     }
-    
+
     // Stop config manager
     if (this.configManager) {
       this.configManager.destroy();
     }
-    
+
     this.logger.info('App destroyed successfully');
   }
 }

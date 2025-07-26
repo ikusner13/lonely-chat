@@ -48,7 +48,7 @@ export const Dashboard: FC<DashboardProps> = ({ tokens, tunnelUrl }) => {
                 name={name}
                 token={token}
                 type={
-                  token.scope.some((s) => s.includes('moderator'))
+                  token.scope.some((s: string) => s.includes('moderator'))
                     ? 'moderator'
                     : 'bot'
                 }

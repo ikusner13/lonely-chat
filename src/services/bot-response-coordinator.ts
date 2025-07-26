@@ -38,6 +38,10 @@ export class BotResponseCoordinator {
     this.logger.info('Bot configs refreshed');
   }
 
+  destroy(): void {
+    this.stop();
+  }
+
   handleIncomingMessage(msg: ChatMessage) {
     this.logger.debug({ chatMessage: msg }, 'Processing message');
     this.messageWindow.addMessage(msg);

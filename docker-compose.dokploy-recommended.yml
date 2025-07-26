@@ -1,0 +1,74 @@
+# Recommended Docker Compose configuration for Dokploy deployment
+# This file includes all necessary environment variables and volume configurations
+
+services:
+  auth-server:
+    build: 
+      context: .
+      dockerfile: auth/Dockerfile
+    environment:
+      # Required environment variables
+      - TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID}
+      - TWITCH_CLIENT_SECRET=${TWITCH_CLIENT_SECRET}
+      - TWITCH_CHANNEL_ID=${TWITCH_CHANNEL_ID}
+      - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
+      # SQLite database path inside container
+      - TOKEN_DB_PATH=/data/tokens.db
+      # Set your domain here for OAuth redirect
+      - TWITCH_REDIRECT_URI=${TWITCH_REDIRECT_URI:-https://your-app.dokploy.com/callback}
+      - PORT=8080
+    volumes:
+      # Persistent storage for SQLite database using named volume
+      - tokens-data:/data
+    expose:
+      - 8080
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+
+  twitch-bot:
+    build: .
+    environment:
+      # Required environment variables
+      - TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID}
+      - TWITCH_CLIENT_SECRET=${TWITCH_CLIENT_SECRET}
+      - TWITCH_CHANNEL_ID=${TWITCH_CHANNEL_ID}
+      - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
+      - OPENROUTER_KEY=${OPENROUTER_KEY}
+      # SQLite database path inside container
+      - TOKEN_DB_PATH=/data/tokens.db
+      # Bot configuration file path
+      - BOT_CONFIG_PATH=/config/bots.toml
+    volumes:
+      # Shared token database with auth-server
+      - tokens-data:/data
+      # Mount for bot configuration file
+      # In Dokploy, use Advanced → Mounts → Add File Mount
+      # Mount Path: /config/bots.toml
+      # Upload your config/bots.toml file
+    depends_on:
+      - auth-server
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+
+# Named volume for persistent token storage
+volumes:
+  tokens-data:
+    driver: local
+
+# External network managed by Dokploy
+networks:
+  dokploy-network:
+    external: true
+
+# Environment variables to set in Dokploy:
+# 
+# TWITCH_CLIENT_ID=your_client_id
+# TWITCH_CLIENT_SECRET=your_client_secret
+# TWITCH_CHANNEL_ID=your_channel_id
+# TWITCH_CHANNEL_NAME=your_channel_name
+# OPENROUTER_KEY=your_openrouter_key
+# TWITCH_REDIRECT_URI=https://your-app.dokploy.com/callback
+#
+# Replace "your-app.dokploy.com" with your actual Dokploy domain

@@ -12,6 +12,7 @@ export interface TokenInfo {
   timeUntilExpiry?: string;
   scopes?: string[];
   username?: string;
+  userId?: string;
 }
 
 // Get token info with expiry status

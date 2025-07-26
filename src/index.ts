@@ -16,9 +16,9 @@ async function main() {
 
     app = new App();
     await app.start();
-    
+
     mainLogger.info('🚀 Twitch bot started successfully');
-    
+
     // Setup signal handlers after successful start
     setupSignalHandlers();
   } catch (error) {
@@ -36,7 +36,7 @@ function setupSignalHandlers() {
         mainLogger.error('App not initialized');
         return;
       }
-      
+
       const configManager = app.getConfigManager();
       await configManager.loadConfig();
       configManager.emit('config:updated');
@@ -58,7 +58,9 @@ function setupSignalHandlers() {
     await gracefulShutdown();
   });
 
-  mainLogger.info('Signal handlers registered (SIGHUP for reload, SIGTERM/SIGINT for shutdown)');
+  mainLogger.info(
+    'Signal handlers registered (SIGHUP for reload, SIGTERM/SIGINT for shutdown)'
+  );
 }
 
 async function gracefulShutdown() {

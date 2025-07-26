@@ -1,7 +1,7 @@
-import type { AccessToken } from '@twurple/auth';
+import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
+import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
-// import { TokenStoreService } from './token-store.service';
-import { TokenJsonStoreService } from './token-json-store.service';
+import { SQLiteTokenStore } from './sqlite-token-store';
 
 export interface TokenData {
   accessToken: string;
@@ -18,244 +18,152 @@ export interface TokenStorage {
   bots: Record<string, TokenData>;
 }
 
-export interface BotTokenFormat {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  obtainmentTimestamp: number;
-}
-
 export class TokenManager {
-  private tokenStore: TokenJsonStoreService;
+  private tokenStore: SQLiteTokenStore;
+  private authProviders = new Map<string, RefreshingAuthProvider>();
+  private userIds = new Map<string, string>();
   private logger = createLogger('TokenManager');
-  private botTokenPaths: Map<string, string> = new Map();
 
-  constructor(filePath = process.env.TOKEN_JSON_PATH || '/data/tokens.json') {
-    this.tokenStore = new TokenJsonStoreService(filePath);
+  constructor(dbPath?: string) {
+    this.tokenStore = new SQLiteTokenStore(dbPath);
+    this.logger.info(
+      `Token database initialized at: ${dbPath || './data/tokens.db'}`
+    );
   }
 
-  loadTokens(): TokenStorage {
-    const allTokens = this.tokenStore.getAllTokens();
-    const channelToken = this.tokenStore.getChannelToken();
+  async getAuthProvider(name: string): Promise<RefreshingAuthProvider> {
+    // Check cache first
+    if (this.authProviders.has(name)) {
+      return this.authProviders.get(name)!;
+    }
 
+    // Load from database - sync operation with Bun
+    const tokenData = this.tokenStore.getToken(name);
+    if (!tokenData) {
+      throw new Error(
+        `No token found for ${name}. Please run the auth server.`
+      );
+    }
+
+    // Create auth provider
+    const authProvider = new RefreshingAuthProvider({
+      clientId: env.TWITCH_CLIENT_ID,
+      clientSecret: env.TWITCH_CLIENT_SECRET,
+    });
+
+    // Set up auto-save on refresh
+    authProvider.onRefresh(async (refreshUserId, newTokenData) => {
+      // Use atomic refresh for consistency
+      await this.tokenStore.refreshTokenAtomic(name, newTokenData, refreshUserId);
+      this.logger.info(`Token refreshed and saved for ${name}`);
+    });
+
+    // Add user with token and get user ID
+    const userId = await authProvider.addUserForToken(tokenData);
+
+    // Store user ID
+    this.userIds.set(name, userId);
+
+    // Cache for reuse
+    this.authProviders.set(name, authProvider);
+    this.logger.info(
+      `Auth provider created for ${name} with user ID ${userId}`
+    );
+
+    return authProvider;
+  }
+
+  saveToken(name: string, token: AccessToken, userId?: string): void {
+    this.tokenStore.saveToken(name, token, userId);
+    this.logger.info(`Token saved for ${name}`);
+  }
+
+  getUserId(name: string): string | null {
+    // Check cache first
+    if (this.userIds.has(name)) {
+      return this.userIds.get(name)!;
+    }
+
+    // Check database
+    const userId = this.tokenStore.getUserId(name);
+    if (userId) {
+      this.userIds.set(name, userId);
+    }
+    return userId;
+  }
+
+  hasTokens(): boolean {
+    return this.tokenStore.hasTokens();
+  }
+
+  getAllTokens() {
+    return this.tokenStore.getAllTokens();
+  }
+
+  close(): void {
+    this.tokenStore.close();
+  }
+
+  // Compatibility methods for auth server
+  loadTokens(): TokenStorage {
+    const allTokens = this.getAllTokens();
     const storage: TokenStorage = {
+      channel: undefined,
       bots: {},
     };
 
-    if (channelToken) {
-      storage.channel = {
-        ...channelToken,
-        accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+    for (const { name, token } of allTokens) {
+      const tokenData: TokenData = {
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken || '',
+        accessTokenExpiresAt: new Date(
+          Date.now() + (token.expiresIn || 3600) * 1000
+        ).toISOString(),
         savedAt: new Date().toISOString(),
-        scope: [],
+        scope: token.scope || [],
+        userId: this.getUserId(name) || undefined,
+        channelName: name,
       };
-    }
 
-    for (const [botName, token] of allTokens) {
-      if (botName !== 'channel') {
-        storage.bots[botName] = {
-          ...token,
-          accessTokenExpiresAt: new Date(
-            Date.now() + 3600 * 1000
-          ).toISOString(),
-          savedAt: new Date().toISOString(),
-          scope: [],
-        };
+      if (name === 'channel') {
+        storage.channel = tokenData;
+      } else {
+        storage.bots[name] = tokenData;
       }
     }
 
     return storage;
   }
 
-  saveTokens(tokens: TokenStorage): void {
+  async saveTokens(tokens: TokenStorage): Promise<void> {
     // Save channel token
     if (tokens.channel) {
-      this.tokenStore.saveToken(
+      await this.saveToken(
         'channel',
-        tokens.channel.accessToken,
-        tokens.channel.refreshToken,
-        'channel',
-        new Date(tokens.channel.accessTokenExpiresAt),
-        tokens.channel.userId!,
-        tokens.channel.channelName!
+        {
+          accessToken: tokens.channel.accessToken,
+          refreshToken: tokens.channel.refreshToken,
+          expiresIn: 0,
+          obtainmentTimestamp: Date.now(),
+          scope: tokens.channel.scope,
+        },
+        tokens.channel.userId
       );
     }
 
     // Save bot tokens
-    for (const [botName, tokenData] of Object.entries(tokens.bots)) {
-      this.tokenStore.saveToken(
-        botName,
-        tokenData.accessToken,
-        tokenData.refreshToken,
-        'bot',
-        new Date(tokenData.accessTokenExpiresAt),
-        tokenData.userId!,
-        tokenData.channelName || botName
+    for (const [name, tokenData] of Object.entries(tokens.bots)) {
+      await this.saveToken(
+        name,
+        {
+          accessToken: tokenData.accessToken,
+          refreshToken: tokenData.refreshToken,
+          expiresIn: 0,
+          obtainmentTimestamp: Date.now(),
+          scope: tokenData.scope,
+        },
+        tokenData.userId
       );
     }
-  }
-
-  getChannelToken(): TokenData | undefined {
-    const token = this.tokenStore.getChannelToken();
-    if (!token) {
-      return;
-    }
-
-    return {
-      ...token,
-      accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-      savedAt: new Date().toISOString(),
-      scope: [],
-      userId: token.userId,
-    };
-  }
-
-  getBotTokens(): Record<string, TokenData> {
-    const allTokens = this.tokenStore.getAllTokens();
-    const bots: Record<string, TokenData> = {};
-
-    for (const [botName, token] of allTokens) {
-      if (botName !== 'channel') {
-        bots[botName] = {
-          ...token,
-          accessTokenExpiresAt: new Date(
-            Date.now() + 3600 * 1000
-          ).toISOString(),
-          savedAt: new Date().toISOString(),
-          scope: [],
-          userId: token.userId,
-        };
-      }
-    }
-
-    return bots;
-  }
-
-  getBotToken(botName: string): TokenData | undefined {
-    const token = this.tokenStore.getToken(botName);
-    if (!token) {
-      return;
-    }
-
-    return {
-      ...token,
-      accessTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-      savedAt: new Date().toISOString(),
-      scope: [],
-      userId: token.userId,
-    };
-  }
-
-  async createBotTokenFile(botName: string): Promise<string> {
-    const tokenData = await this.getBotToken(botName);
-    if (!tokenData) {
-      throw new Error(`No token found for bot: ${botName}`);
-    }
-
-    const botTokenPath = `./bot-${botName}-token.json`;
-    const botTokenFormat: BotTokenFormat = {
-      accessToken: tokenData.accessToken,
-      refreshToken: tokenData.refreshToken,
-      expiresIn: 0, // Will be refreshed
-      obtainmentTimestamp: Date.now(),
-    };
-
-    await Bun.write(botTokenPath, JSON.stringify(botTokenFormat, null, 2));
-    this.botTokenPaths.set(botName, botTokenPath);
-
-    return botTokenPath;
-  }
-
-  async updateChannelToken(updatedToken: Partial<TokenData>): Promise<void> {
-    const current = await this.getChannelToken();
-    if (!current) {
-      throw new Error('No channel token to update');
-    }
-
-    const merged = {
-      ...current,
-      ...updatedToken,
-      savedAt: new Date().toISOString(),
-    };
-
-    this.tokenStore.saveToken(
-      'channel',
-      merged.accessToken,
-      merged.refreshToken,
-      'channel',
-      new Date(merged.accessTokenExpiresAt),
-      merged.userId!,
-      merged.channelName!
-    );
-  }
-
-  async updateBotToken(
-    botName: string,
-    updatedToken: Partial<TokenData>
-  ): Promise<void> {
-    const current = await this.getBotToken(botName);
-    if (!current) {
-      throw new Error(`No token found for bot: ${botName}`);
-    }
-
-    const merged = {
-      ...current,
-      ...updatedToken,
-      savedAt: new Date().toISOString(),
-    };
-
-    this.tokenStore.saveToken(
-      botName,
-      merged.accessToken,
-      merged.refreshToken,
-      'bot',
-      new Date(merged.accessTokenExpiresAt),
-      merged.userId!,
-      merged.channelName || botName
-    );
-  }
-
-  // Helper to convert Twurple AccessToken to our TokenData format
-  convertAccessToken(token: AccessToken, userId?: string): Partial<TokenData> {
-    return {
-      accessToken: token.accessToken,
-      refreshToken: token.refreshToken || '',
-      accessTokenExpiresAt: token.expiresIn
-        ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
-        : new Date(Date.now() + 3600 * 1000).toISOString(),
-      scope: token.scope || [],
-      userId,
-    };
-  }
-
-  // Get all bot token file paths
-  getBotTokenPaths(): Map<string, string> {
-    return new Map(this.botTokenPaths);
-  }
-
-  // Clean up bot token files
-  async cleanupBotTokenFiles(): Promise<void> {
-    for (const [botName, path] of this.botTokenPaths) {
-      try {
-        const file = Bun.file(path);
-        // biome-ignore lint/nursery/noAwaitInLoop: fine
-        if (await file.exists()) {
-          await file.delete();
-          this.logger.info(`🗑️ Cleaned up token file for ${botName}`);
-        }
-      } catch (error) {
-        this.logger.error(
-          { err: error },
-          `Failed to clean up token file for ${botName}`
-        );
-      }
-    }
-
-    this.botTokenPaths.clear();
-  }
-
-  // Close database connection
-  close(): void {
-    this.tokenStore.close();
   }
 }

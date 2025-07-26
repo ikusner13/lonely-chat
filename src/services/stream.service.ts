@@ -26,8 +26,6 @@ export class StreamService extends EventEmitter<{
   }
 
   static async createAndMonitor({
-    clientId,
-    clientSecret,
     channelUserId,
     tokenManager,
   }: {
@@ -36,33 +34,7 @@ export class StreamService extends EventEmitter<{
     channelUserId: string;
     tokenManager: TokenManager;
   }): Promise<StreamService> {
-    const channelToken = tokenManager.getChannelToken();
-    if (!channelToken) {
-      throw new Error(
-        'Channel token not found. Run: bun run generate-channel-token'
-      );
-    }
-    const authProvider = new RefreshingAuthProvider({
-      clientId,
-      clientSecret,
-    });
-
-    authProvider.onRefresh(
-      async (userId: string, newTokenData: AccessToken) => {
-        const updatedToken = tokenManager.convertAccessToken(
-          newTokenData,
-          userId
-        );
-        await tokenManager.updateChannelToken(updatedToken);
-      }
-    );
-
-    await authProvider.addUserForToken({
-      accessToken: channelToken.accessToken,
-      refreshToken: channelToken.refreshToken,
-      expiresIn: null,
-      obtainmentTimestamp: Date.now(),
-    });
+    const authProvider = await tokenManager.getAuthProvider('channel');
 
     const apiClient = new ApiClient({ authProvider });
 
@@ -94,7 +66,9 @@ export class StreamService extends EventEmitter<{
       service.logger.info('🟢 Stream is already online, connecting bots...');
       service.emit('stream:online');
     } else {
-      service.logger.info('⏸️  Stream is offline, waiting for stream to go online...');
+      service.logger.info(
+        '⏸️  Stream is offline, waiting for stream to go online...'
+      );
     }
 
     return service;

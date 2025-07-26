@@ -60,4 +60,9 @@ export class BotManager {
       this.moderatorBot.updateConfig(config);
     }
   }
+
+  destroy(): void {
+    this.disconnectAll();
+    this.bots.clear();
+  }
 }

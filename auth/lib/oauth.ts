@@ -1,6 +1,6 @@
 import { Twitch } from 'arctic';
-import { env } from '../env';
 import { createLogger } from '@/utils/logger';
+import { env } from '../env';
 
 const logger = createLogger('OAuth');
 

@@ -1,0 +1,41 @@
+services:
+  auth-server:
+    build: 
+      context: .
+      dockerfile: auth/Dockerfile
+    environment:
+      - TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID}
+      - TWITCH_CLIENT_SECRET=${TWITCH_CLIENT_SECRET}
+      - TWITCH_CHANNEL_ID=${TWITCH_CHANNEL_ID}
+      - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
+      - TOKEN_DB_PATH=/data/tokens.db
+      - TWITCH_REDIRECT_URI=${TWITCH_REDIRECT_URI}
+      - PORT=8080
+    volumes:
+      - tokens-data:/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    # Dokploy handles healthchecks automatically
+
+  twitch-bot:
+    build: .
+    environment:
+      - TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID}
+      - TWITCH_CLIENT_SECRET=${TWITCH_CLIENT_SECRET}
+      - TWITCH_CHANNEL_ID=${TWITCH_CHANNEL_ID}
+      - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
+      - OPENROUTER_KEY=${OPENROUTER_KEY}
+      - TOKEN_DB_PATH=/data/tokens.db
+      - BOT_CONFIG_PATH=/config/bots.toml
+    volumes:
+      - tokens-data:/data
+      # Note: /config/bots.toml will be added via Dokploy file mount
+    depends_on:
+      - auth-server
+    restart: unless-stopped
+    # Dokploy handles healthchecks automatically
+
+volumes:
+  tokens-data:
+    driver: local

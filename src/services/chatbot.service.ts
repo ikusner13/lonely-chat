@@ -1,4 +1,4 @@
-import { RefreshingAuthProvider } from '@twurple/auth';
+import type { RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
 import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
@@ -32,27 +32,7 @@ export class ChatbotService {
     additionalIntents: string[] = []
   ): Promise<ChatbotService> {
     try {
-      const token = await tokenManager.getBotToken(botName);
-
-      if (!token) {
-        throw new Error(`Token not found for bot ${botName}`);
-      }
-
-      const authProvider = new RefreshingAuthProvider({
-        clientId: env.TWITCH_CLIENT_ID,
-        clientSecret: env.TWITCH_CLIENT_SECRET,
-      });
-
-      authProvider.addUserForToken(
-        {
-          accessToken: token.accessToken,
-          refreshToken: token.refreshToken,
-          expiresIn: 0,
-          obtainmentTimestamp: Date.now(),
-          scope: token.scope,
-        },
-        ['chat', ...additionalIntents]
-      );
+      const authProvider = await tokenManager.getAuthProvider(botName);
 
       const bot = new ChatClient({
         authProvider,

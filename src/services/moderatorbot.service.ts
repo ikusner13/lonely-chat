@@ -56,13 +56,7 @@ export class ModeratorBotService extends EventEmitter<{
         authProvider: chatbot.authProvider,
       });
 
-      const tokenData = await tokenManager.getBotToken(botName);
-
-      if (!tokenData) {
-        throw new Error(`Token not found for bot ${botName}`);
-      }
-
-      const botUserId = tokenData.userId;
+      const botUserId = tokenManager.getUserId(botName);
 
       if (!botUserId) {
         throw new Error(`Bot user ID not found for bot ${botName}`);
