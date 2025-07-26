@@ -21,7 +21,14 @@ export class App {
   async start() {
     this.logger.info('🚀 Starting Twitch Bot App...');
 
-    // Initialize core services
+    await this.initializeServices();
+    await this.connectStream();
+
+    this.logger.info('✅ App started successfully!');
+  }
+
+  private async initializeServices() {
+    // Core services
     this.tokenManager = new TokenManager(
       process.env.TOKEN_DB_PATH || './tokens.db'
     );
@@ -29,11 +36,11 @@ export class App {
     this.messageWindow = new ChatMessageWindow();
     const queue = new ChatbotQueue();
 
-    // Initialize bot manager
+    // Bot management
     this.botManager = new BotManager();
     await this.botManager.initialize(this.tokenManager);
 
-    // Initialize response coordinator after bots are created
+    // Response coordination
     this.responseCoordinator = new BotResponseCoordinator(
       this.ai,
       queue,
@@ -41,11 +48,8 @@ export class App {
       this.botManager.getBots()
     );
 
+    // Chat listener
     this.chatListener = new ChatListenerService();
-
-    await this.connectStream();
-
-    this.logger.info('✅ App started successfully!');
   }
 
   private async connectStream() {
@@ -57,7 +61,7 @@ export class App {
       tokenManager: this.tokenManager,
     });
 
-    streamService.on('stream:online', () => this.connectAll());
+    streamService.on('stream:online', async () => this.connectAll());
     streamService.on('stream:offline', () => this.disconnectAll());
   }
 

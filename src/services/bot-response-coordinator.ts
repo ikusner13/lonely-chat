@@ -9,7 +9,6 @@ import type { ChatbotQueue } from './chatbot-queue';
 export class BotResponseCoordinator {
   private logger = createLogger('BotResponseCoordinator');
   private readonly RANDOM_RESPONSE_CHANCE = 0.25;
-
   private ai: AIService;
   private queue: ChatbotQueue;
   private messageWindow: ChatMessageWindow;

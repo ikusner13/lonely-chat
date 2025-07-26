@@ -5,15 +5,13 @@ import { logger } from './utils/logger';
 const mainLogger = logger.child({ module: 'main' });
 
 // Handle graceful shutdown
-process.on('SIGINT', () => {
+const handleShutdown = () => {
   mainLogger.info('⏹️  Shutting down gracefully...');
   process.exit(0);
-});
+};
 
-process.on('SIGTERM', () => {
-  mainLogger.info('⏹️  Shutting down gracefully...');
-  process.exit(0);
-});
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
 
 // Start the app
 async function main() {
