@@ -8,14 +8,23 @@ services:
       - TWITCH_CHANNEL_NAME=${TWITCH_CHANNEL_NAME}
       - OPENROUTER_KEY=${OPENROUTER_KEY}
       - TOKEN_DB_PATH=/data/tokens.db
+      - BOT_CONFIG_PATH=/config/bots.toml
     volumes:
       - bot-data:/data
+      - ./config:/config:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+    
+    # Configuration Reload Instructions:
+    # After editing config/bots.toml, reload without restart:
+    #   docker compose kill -s HUP twitch-bot
+    #
+    # View reload status in logs:
+    #   docker compose logs -f twitch-bot | grep -i config
 
 volumes:
   bot-data:

@@ -1,29 +1,34 @@
 import { RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
-import type { BotName } from '@/config/bot.schema';
-import { getBotConfig } from '@/config/bot.schema';
 import { env } from '@/env';
+import { createLogger } from '@/utils/logger';
+import type { BotConfig } from './config-manager';
 import type { TokenManager } from './token.service';
 
 export class ChatbotService {
   private readonly bot: ChatClient;
   private readonly authProvider_: RefreshingAuthProvider;
   private readonly twitchChannel = env.TWITCH_CHANNEL_NAME;
-  private readonly botName_: BotName;
+  private readonly botName_: string;
+  private config: BotConfig;
+  private logger = createLogger('ChatbotService');
 
   private constructor(
     authProvider: RefreshingAuthProvider,
     bot: ChatClient,
-    botName: BotName
+    botName: string,
+    config: BotConfig
   ) {
     this.authProvider_ = authProvider;
     this.bot = bot;
     this.botName_ = botName;
+    this.config = config;
   }
 
   static async create(
     tokenManager: TokenManager,
-    botName: BotName,
+    botName: string,
+    config: BotConfig,
     additionalIntents: string[] = []
   ): Promise<ChatbotService> {
     try {
@@ -54,7 +59,7 @@ export class ChatbotService {
         channels: [env.TWITCH_CHANNEL_NAME],
       });
 
-      return new ChatbotService(authProvider, bot, botName);
+      return new ChatbotService(authProvider, bot, botName, config);
     } catch (error) {
       throw new Error(
         `Failed to create ChatbotService: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -66,7 +71,11 @@ export class ChatbotService {
     return this.authProvider_;
   }
 
-  get botName(): BotName {
+  get botName(): string {
+    return this.botName_;
+  }
+
+  getName(): string {
     return this.botName_;
   }
 
@@ -84,10 +93,15 @@ export class ChatbotService {
 
   connectAndIntroduce(): void {
     this.joinChannel();
+    this.say(this.config.introMessage ?? '👋');
+  }
 
-    const botConfig = getBotConfig();
-    const botPersonality = botConfig[this.botName_];
+  updateConfig(newConfig: BotConfig): void {
+    this.config = newConfig;
+    this.logger.info(`Updated config for ${this.botName_}`);
+  }
 
-    this.say(botPersonality.introMessage ?? '👋');
+  getConfig(): BotConfig {
+    return this.config;
   }
 }

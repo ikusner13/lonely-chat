@@ -1,10 +1,10 @@
-import type { BotName } from '@/config/bot.schema';
 import { createLogger } from '@/utils/logger';
 import type { AIService } from './ai.service';
 import type { ChatMessage } from './chat-listener.service';
 import type { ChatMessageWindow } from './chat-message-window';
 import type { ChatbotService } from './chatbot.service';
 import type { ChatbotQueue } from './chatbot-queue';
+import type { ConfigManager } from './config-manager';
 
 export class BotResponseCoordinator {
   private logger = createLogger('BotResponseCoordinator');
@@ -12,22 +12,30 @@ export class BotResponseCoordinator {
   private ai: AIService;
   private queue: ChatbotQueue;
   private messageWindow: ChatMessageWindow;
-  private bots: Map<BotName, ChatbotService>;
+  private bots: Map<string, ChatbotService>;
+  private configManager: ConfigManager;
 
   constructor(
     ai: AIService,
     queue: ChatbotQueue,
     messageWindow: ChatMessageWindow,
-    bots: Map<BotName, ChatbotService>
+    bots: Map<string, ChatbotService>,
+    configManager: ConfigManager
   ) {
     this.ai = ai;
     this.queue = queue;
     this.messageWindow = messageWindow;
     this.bots = bots;
+    this.configManager = configManager;
   }
 
   stop(): void {
     this.queue.stop();
+  }
+
+  refreshBotConfigs(configManager: ConfigManager): void {
+    this.configManager = configManager;
+    this.logger.info('Bot configs refreshed');
   }
 
   handleIncomingMessage(msg: ChatMessage) {
@@ -38,8 +46,8 @@ export class BotResponseCoordinator {
     this.queueBotResponses(botsToRespond, msg);
   }
 
-  private determineRespondingBots(msg: ChatMessage): BotName[] {
-    const botsToRespond: BotName[] = [];
+  private determineRespondingBots(msg: ChatMessage): string[] {
+    const botsToRespond: string[] = [];
 
     for (const [botName] of this.bots) {
       if (this.isBotOwnMessage(msg, botName)) {
@@ -56,22 +64,22 @@ export class BotResponseCoordinator {
     return botsToRespond;
   }
 
-  private isBotOwnMessage(msg: ChatMessage, botName: BotName): boolean {
+  private isBotOwnMessage(msg: ChatMessage, botName: string): boolean {
     return msg.user.toLowerCase() === botName.toLowerCase();
   }
 
-  private isBotMentioned(msg: ChatMessage, botName: BotName): boolean {
+  private isBotMentioned(msg: ChatMessage, botName: string): boolean {
     return msg.message.toLowerCase().includes(`@${botName.toLowerCase()}`);
   }
 
-  private shouldBotRandomlyRespond(botsAlreadyResponding: BotName[]): boolean {
+  private shouldBotRandomlyRespond(botsAlreadyResponding: string[]): boolean {
     return (
       botsAlreadyResponding.length === 0 &&
       Math.random() < this.RANDOM_RESPONSE_CHANCE
     );
   }
 
-  private queueBotResponses(botsToRespond: BotName[], msg: ChatMessage): void {
+  private queueBotResponses(botsToRespond: string[], msg: ChatMessage): void {
     for (const botName of botsToRespond) {
       const bot = this.bots.get(botName);
 
@@ -80,10 +88,17 @@ export class BotResponseCoordinator {
         continue;
       }
 
+      const botConfig = this.configManager.getBot(botName);
+      if (!botConfig) {
+        this.logger.error(`Bot config not found for ${botName}`);
+        continue;
+      }
+
       this.queue.addMessage(botName, async () => {
         try {
           const response = await this.ai.generateResponse({
             botName,
+            botConfig,
             triggerMessage: `${msg.user}: ${msg.message}`,
             context: this.messageWindow.messages,
           });

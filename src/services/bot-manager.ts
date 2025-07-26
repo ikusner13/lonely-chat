@@ -1,19 +1,25 @@
-import type { BotName } from '@/config/bot.schema';
 import { createLogger } from '@/utils/logger';
 import type { AIService } from './ai.service';
 import { createAllBots } from './bot-factory';
 import type { ChatMessage } from './chat-listener.service';
 import type { ChatbotService } from './chatbot.service';
+import type { BotConfig, ConfigManager } from './config-manager';
 import type { ModeratorBotService } from './moderatorbot.service';
 import type { TokenManager } from './token.service';
 
 export class BotManager {
-  private bots: Map<BotName, ChatbotService> = new Map();
+  private bots: Map<string, ChatbotService> = new Map();
   private moderatorBot!: ModeratorBotService;
   private logger = createLogger('BotManager');
 
-  async initialize(tokenManager: TokenManager): Promise<void> {
-    const { bots, moderatorBot } = await createAllBots(tokenManager);
+  async initialize(
+    tokenManager: TokenManager,
+    configManager: ConfigManager
+  ): Promise<void> {
+    const { bots, moderatorBot } = await createAllBots(
+      tokenManager,
+      configManager
+    );
     this.bots = bots;
     this.moderatorBot = moderatorBot;
   }
@@ -45,7 +51,13 @@ export class BotManager {
     this.moderatorBot.handleMessage(msg);
   }
 
-  getBots(): Map<BotName, ChatbotService> {
+  getBots(): Map<string, ChatbotService> {
     return this.bots;
+  }
+
+  updateModeratorConfig(config: BotConfig): void {
+    if (this.moderatorBot) {
+      this.moderatorBot.updateConfig(config);
+    }
   }
 }

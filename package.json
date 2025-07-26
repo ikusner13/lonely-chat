@@ -17,6 +17,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:restart": "docker compose restart",
+    "docker:reload": "./scripts/reload-config.sh",
     "docker:shell": "docker compose exec twitch-bot sh",
     "docker:db:backup": "docker compose exec twitch-bot cp /data/tokens.db /data/tokens.db.backup",
     "docker:db:copy": "docker compose cp tokens.db twitch-bot:/data/tokens.db"

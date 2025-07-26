@@ -1,10 +1,9 @@
 import PQueue from 'p-queue';
-import type { BotName } from '@/config/bot.schema';
 import { createLogger } from '@/utils/logger';
 
 export class ChatbotQueue {
   private readonly mainQueue: PQueue;
-  private readonly botQueues: Map<BotName, PQueue>;
+  private readonly botQueues: Map<string, PQueue>;
   private readonly minDelay: number;
   private readonly maxDelay: number;
   private readonly logger = createLogger('ChatbotQueue');
@@ -16,7 +15,7 @@ export class ChatbotQueue {
     this.maxDelay = maxDelay;
   }
 
-  addMessage(botName: BotName, messageAction: () => Promise<void>): void {
+  addMessage(botName: string, messageAction: () => Promise<void>): void {
     this.mainQueue.add(() => {
       let botQueue = this.botQueues.get(botName);
       if (!botQueue) {

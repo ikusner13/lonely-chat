@@ -12,3 +12,6 @@ logs/
 
 # build
 dist/
+
+# config
+config/bots.toml

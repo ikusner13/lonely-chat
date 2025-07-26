@@ -5,6 +5,7 @@ import { BotResponseCoordinator } from './services/bot-response-coordinator';
 import { ChatListenerService } from './services/chat-listener.service';
 import { ChatMessageWindow } from './services/chat-message-window';
 import { ChatbotQueue } from './services/chatbot-queue';
+import { ConfigManager } from './services/config-manager';
 import { StreamService } from './services/stream.service';
 import { TokenManager } from './services/token.service';
 import { createLogger } from './utils/logger';
@@ -16,6 +17,7 @@ export class App {
   private ai!: AIService;
   private tokenManager!: TokenManager;
   private responseCoordinator!: BotResponseCoordinator;
+  private configManager!: ConfigManager;
   private logger = createLogger('App');
 
   async start() {
@@ -28,6 +30,15 @@ export class App {
   }
 
   private async initializeServices() {
+    // Initialize config first
+    this.configManager = new ConfigManager();
+    await this.configManager.initialize();
+
+    // Set up config update handler
+    this.configManager.on('config:updated', () => {
+      this.updateAllBotConfigs();
+    });
+
     // Core services
     this.tokenManager = new TokenManager(
       process.env.TOKEN_DB_PATH || './tokens.db'
@@ -38,14 +49,15 @@ export class App {
 
     // Bot management
     this.botManager = new BotManager();
-    await this.botManager.initialize(this.tokenManager);
+    await this.botManager.initialize(this.tokenManager, this.configManager);
 
     // Response coordination
     this.responseCoordinator = new BotResponseCoordinator(
       this.ai,
       queue,
       this.messageWindow,
-      this.botManager.getBots()
+      this.botManager.getBots(),
+      this.configManager
     );
 
     // Chat listener
@@ -80,5 +92,61 @@ export class App {
     this.chatListener.stop();
     this.responseCoordinator.stop();
     this.botManager.disconnectAll();
+  }
+
+  private updateAllBotConfigs() {
+    this.logger.info('Updating all bot configs...');
+
+    // Get fresh config
+    const bots = this.configManager.getBots();
+
+    // Update each bot's config
+    const botServices = this.botManager.getBots();
+    for (const botConfig of bots) {
+      if (botConfig.role === 'moderator') {
+        // Update moderator bot config
+        this.botManager.updateModeratorConfig(botConfig);
+      } else {
+        // Update regular bot config
+        const bot = botServices.get(botConfig.name);
+        if (bot) {
+          bot.updateConfig(botConfig);
+        }
+      }
+    }
+
+    // Let response coordinator refresh its view
+    this.responseCoordinator.refreshBotConfigs(this.configManager);
+  }
+
+  // Getter for signal handler access
+  getConfigManager(): ConfigManager {
+    return this.configManager;
+  }
+
+  async destroy(): Promise<void> {
+    this.logger.info('Destroying app services...');
+    
+    // Stop stream service first
+    if (this.streamService) {
+      await this.streamService.stop();
+    }
+    
+    // Stop bot manager
+    if (this.botManager) {
+      await this.botManager.destroy();
+    }
+    
+    // Stop response coordinator
+    if (this.responseCoordinator) {
+      await this.responseCoordinator.destroy();
+    }
+    
+    // Stop config manager
+    if (this.configManager) {
+      this.configManager.destroy();
+    }
+    
+    this.logger.info('App destroyed successfully');
   }
 }

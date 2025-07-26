@@ -1,12 +1,11 @@
 import { ApiClient } from '@twurple/api';
 import { EventEmitter } from 'tseep';
-import type { BotName } from '@/config/bot.schema';
-import { getBotConfig } from '@/config/bot.schema';
 import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
 import type { AIService } from './ai.service';
 import type { ChatMessage, Role } from './chat-listener.service';
 import { ChatbotService } from './chatbot.service';
+import type { BotConfig } from './config-manager';
 import type { TokenManager } from './token.service';
 
 export class ModeratorBotService extends EventEmitter<{
@@ -22,29 +21,36 @@ export class ModeratorBotService extends EventEmitter<{
 
   private modMessageQueue_: ChatMessage[] = [];
   private botUserId: string;
+  private config: BotConfig;
 
   private constructor(
     chatbot: ChatbotService,
     apiClient: ApiClient,
-    botUserId: string
+    botUserId: string,
+    config: BotConfig
   ) {
     super();
 
     this.chatbot = chatbot;
     this.apiClient = apiClient;
     this.botUserId = botUserId;
+    this.config = config;
 
     this.startQueueCheckInterval();
   }
 
   static async create(
     tokenManager: TokenManager,
-    botName: BotName
+    botName: string,
+    config: BotConfig
   ): Promise<ModeratorBotService> {
     try {
-      const chatbot = await ChatbotService.create(tokenManager, botName, [
-        'moderation',
-      ]);
+      const chatbot = await ChatbotService.create(
+        tokenManager,
+        botName,
+        config,
+        ['moderation']
+      );
 
       const apiClient = new ApiClient({
         authProvider: chatbot.authProvider,
@@ -62,7 +68,7 @@ export class ModeratorBotService extends EventEmitter<{
         throw new Error(`Bot user ID not found for bot ${botName}`);
       }
 
-      return new ModeratorBotService(chatbot, apiClient, botUserId);
+      return new ModeratorBotService(chatbot, apiClient, botUserId, config);
     } catch (error) {
       throw new Error(
         `Failed to create ModeratorBotService: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -82,6 +88,12 @@ export class ModeratorBotService extends EventEmitter<{
 
   say(message: string): void {
     this.chatbot.say(message);
+  }
+
+  updateConfig(newConfig: BotConfig): void {
+    this.config = newConfig;
+    this.chatbot.updateConfig(newConfig);
+    this.logger.info('Updated config for moderator bot');
   }
 
   async timeout({
@@ -176,14 +188,12 @@ export class ModeratorBotService extends EventEmitter<{
   async setupAndConnect(ai: AIService): Promise<void> {
     await this.joinChannel();
 
-    const botConfig = getBotConfig();
-    const moderatorBot = botConfig.neckbearddiscordmod;
-
-    this.say(moderatorBot.introMessage ?? '👋');
+    this.say(this.config.introMessage ?? '👋');
 
     this.on('moderate', async (messages) => {
       const moderationResults = await ai.generateModerationResponse({
-        moderatorBotName: 'neckbearddiscordmod',
+        moderatorBotName: this.config.name,
+        moderatorConfig: this.config,
         messages,
       });
 

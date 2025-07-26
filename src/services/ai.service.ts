@@ -1,11 +1,10 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateObject, generateText, type ModelMessage } from 'ai';
-import { type BotName, getBotPersonality } from '@/config/bot.schema';
-import { env } from '@/env';
-import '@/config/bots';
 import z from 'zod';
+import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
 import type { ChatMessage } from './chat-listener.service';
+import type { BotConfig } from './config-manager';
 
 export class AIService {
   private openrouter;
@@ -17,16 +16,16 @@ export class AIService {
 
   async generateResponse({
     botName,
+    botConfig,
     triggerMessage,
     context,
   }: {
-    botName: BotName;
+    botName: string;
+    botConfig: BotConfig;
     triggerMessage: string;
     context?: Array<{ user: string; message: string; role: string }>;
   }): Promise<string | null> {
     try {
-      const personality = getBotPersonality(botName);
-
       const messages: ModelMessage[] = [];
 
       if (context && context.length > 0) {
@@ -39,13 +38,13 @@ export class AIService {
       });
 
       const result = await generateText({
-        model: this.openrouter.chat(personality.model, {
+        model: this.openrouter.chat(botConfig.model, {
           models: [],
         }),
-        system: this.buildSystemPrompt(botName),
+        system: this.buildSystemPrompt(botName, botConfig),
         messages,
-        temperature: personality.temperature,
-        maxOutputTokens: personality.maxTokens,
+        temperature: botConfig.temperature || 0.7,
+        maxOutputTokens: botConfig.maxTokens || 150,
       });
 
       return result.text;
@@ -60,9 +59,11 @@ export class AIService {
 
   async generateModerationResponse({
     moderatorBotName,
+    moderatorConfig,
     messages,
   }: {
-    moderatorBotName: BotName;
+    moderatorBotName: string;
+    moderatorConfig: BotConfig;
     messages: ChatMessage[];
   }): Promise<{
     violations: {
@@ -71,8 +72,6 @@ export class AIService {
       duration: number;
     }[];
   } | null> {
-    const personality = getBotPersonality(moderatorBotName);
-
     const moderationMessages = this.buildModerationMessages(
       messages,
       moderatorBotName
@@ -80,7 +79,7 @@ export class AIService {
 
     try {
       const { object } = await generateObject({
-        model: this.openrouter.chat(personality.model),
+        model: this.openrouter.chat(moderatorConfig.model),
         schema: z.object({
           violations: z.array(
             z.object({
@@ -117,8 +116,8 @@ Each object in the array must have:
 - reason: Brief reason for the timeout (max 100 chars)
 - duration: Timeout duration in seconds (1-60)`,
         messages: moderationMessages,
-        temperature: personality.temperature,
-        maxOutputTokens: personality.maxTokens,
+        temperature: moderatorConfig.temperature || 0.7,
+        maxOutputTokens: moderatorConfig.maxTokens || 150,
       });
 
       this.logger.info({ moderationResults: object }, 'Moderation results');
@@ -136,9 +135,8 @@ Each object in the array must have:
   /**
    * Build system prompt for the bot
    */
-  private buildSystemPrompt(botName: BotName): string {
-    const personality = getBotPersonality(botName);
-    return `${personality.systemPrompt}\n\nYou are ${botName}. Critical instructions:
+  private buildSystemPrompt(botName: string, botConfig: BotConfig): string {
+    return `${botConfig.systemPrompt}\n\nYou are ${botName}. Critical instructions:
 - All messages you receive are formatted as "username: message content"
 - When you see "@${botName}" in a message, that user is talking directly TO YOU
 - DO NOT write "botname:" or "[botname]:" or any username prefix in your responses
@@ -151,7 +149,7 @@ Each object in the array must have:
 
   private buildModerationMessages(
     messages: ChatMessage[],
-    moderatorBotName: BotName
+    moderatorBotName: string
   ): ModelMessage[] {
     const moderationMessages: ModelMessage[] = [];
 
@@ -174,7 +172,7 @@ Each object in the array must have:
   private buildMessagesFromContext(
     messages: ModelMessage[],
     context: Array<{ user: string; message: string; role: string }>,
-    botName: BotName
+    botName: string
   ): void {
     for (const msg of context) {
       if (msg.user.toLowerCase() === botName.toLowerCase()) {

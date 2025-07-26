@@ -6,6 +6,7 @@ A Twitch bot service that automatically connects/disconnects bots based on strea
 
 - **Stream-aware bot management**: Bots automatically connect when stream goes online and disconnect when offline
 - **Multi-bot support**: Manage multiple bots with different credentials
+- **Live config reloading**: Update bot settings without disconnecting (`npm run docker:reload`)
 - **Token management**: OAuth flow for generating and storing tokens
 - **EventSub WebSocket**: Real-time stream status monitoring
 
@@ -114,6 +115,70 @@ The service will:
 1. Connect to Twitch EventSub to monitor your channel
 2. When your stream goes online, all configured bots connect to chat
 3. When your stream goes offline, all bots disconnect
+
+## 🔄 Configuration Management
+
+### Updating Bot Settings Without Restart
+
+You can update your bot configurations (prompts, temperature, models) without disconnecting them from Twitch!
+
+#### Quick Start
+
+1. **Edit your bot configuration:**
+   ```bash
+   nano config/bots.toml  # or use your favorite editor
+   ```
+
+2. **Apply the changes:**
+
+   **If using Docker (recommended):**
+   ```bash
+   npm run docker:reload
+   ```
+   
+   **Or manually:**
+   ```bash
+   docker compose kill -s HUP twitch-bot
+   ```
+
+   **For local development:**
+   ```bash
+   # Find the bot process
+   ps aux | grep "bun.*src/index.ts" | grep -v grep
+   # Note the PID (first number), then:
+   kill -HUP <PID>
+   ```
+
+3. **Verify the reload worked:**
+   ```bash
+   docker compose logs -f twitch-bot | grep -i "config"
+   # You should see: "✅ Configuration reloaded successfully"
+   ```
+
+### ✨ What You Can Change
+
+- Bot personalities (system prompts)
+- Temperature settings
+- AI models
+- Token limits
+- Fallback models
+- Any other bot configuration
+
+### 🛡️ Safe Reloading
+
+- **Bots stay connected** - No disconnection from Twitch
+- **Validation first** - Bad configs are rejected
+- **Keeps working config** - Errors don't crash your bots
+- **Instant updates** - Changes apply immediately
+
+### ⚠️ If Something Goes Wrong
+
+If your config has errors, you'll see in the logs:
+```
+❌ Failed to reload configuration
+```
+
+The bots will continue using the last working configuration. Fix the error in your `bots.toml` and try again.
 
 ## Architecture
 
