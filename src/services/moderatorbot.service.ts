@@ -99,11 +99,18 @@ export class ModeratorBotService extends EventEmitter<{
 
     try {
       await this.apiClient.asUser(this.botUserId, async (userClient) => {
-        await userClient.moderation.banUser(env.TWITCH_CHANNEL_ID, {
-          user: twitchUser.id,
-          reason,
-          duration: this.ensureMaxTimeoutDuration(duration),
-        });
+        const bannedUsers = await userClient.moderation.banUser(
+          env.TWITCH_CHANNEL_ID,
+          {
+            user: twitchUser.id,
+            reason,
+            duration: this.ensureMaxTimeoutDuration(duration),
+          }
+        );
+
+        const bannedUser = await bannedUsers[0]?.getUser();
+
+        this.logger.info({ user: bannedUser.displayName }, 'Banned user');
       });
     } catch (error) {
       this.logger.error(
