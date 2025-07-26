@@ -1,4 +1,4 @@
-import { watch } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { EventEmitter } from 'tseep';
 import { createLogger } from '@/utils/logger';
 
@@ -37,8 +37,15 @@ export class ConfigManager extends EventEmitter<{
     this.setupWatcher();
   }
 
-  public async loadConfig(): Promise<void> {
+  async loadConfig(): Promise<void> {
     try {
+      // Check if file exists first
+      if (!existsSync(this.configPath)) {
+        const errorMsg = `Configuration file not found: ${this.configPath}\n\nPlease ensure the bots.toml file exists at the specified path.\nFor Docker deployments, create the file via the Dokploy UI in Advanced → Mounts.`;
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
       // Convert relative path to absolute for import
       const absolutePath = this.configPath.startsWith('/')
         ? this.configPath
@@ -46,7 +53,7 @@ export class ConfigManager extends EventEmitter<{
 
       // Force re-import by adding timestamp query parameter
       const timestampedPath = `${absolutePath}?t=${Date.now()}`;
-      
+
       // Clear any existing module cache
       try {
         const resolvedPath = require.resolve(absolutePath);
@@ -69,21 +76,34 @@ export class ConfigManager extends EventEmitter<{
       this.config = newConfig;
       this.logger.info(`Loaded ${this.config.bots.length} bots from config`);
     } catch (error) {
-      // Keep existing config on error
-      this.logger.error({ err: error }, 'Failed to load config - keeping existing configuration');
-      this.emit('config:error', error as Error);
+      // Re-throw to halt the app
+      this.logger.error({ err: error }, 'Failed to load config');
+      throw error;
     }
   }
 
   private setupWatcher(): void {
-    this.watcher = watch(this.configPath, async (eventType) => {
-      if (eventType === 'change') {
-        this.logger.info('Config changed, reloading...');
-        await this.loadConfig();
-        // Just emit that config updated - let consumers figure out what to do
-        this.emit('config:updated');
-      }
-    });
+    // Check if file exists before watching
+    if (!existsSync(this.configPath)) {
+      this.logger.warn(
+        `Config file ${this.configPath} does not exist - skipping file watcher`
+      );
+      return;
+    }
+
+    try {
+      this.watcher = watch(this.configPath, async (eventType) => {
+        if (eventType === 'change') {
+          this.logger.info('Config changed, reloading...');
+          await this.loadConfig();
+          // Just emit that config updated - let consumers figure out what to do
+          this.emit('config:updated');
+        }
+      });
+      this.logger.info(`Watching config file: ${this.configPath}`);
+    } catch (error) {
+      this.logger.error({ err: error }, 'Failed to setup config watcher');
+    }
   }
 
   destroy(): void {
