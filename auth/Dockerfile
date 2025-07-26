@@ -22,15 +22,9 @@ COPY src/services/token-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
 COPY src/utils/logger.ts src/utils/
 
-# Create directory for database with proper permissions
-RUN mkdir -p /data && chown bun:bun /data
-
 # set production environment
 ENV NODE_ENV=production
 ENV TOKEN_DB_PATH=/data/tokens.db
-
-# Set volume for persistent data
-VOLUME ["/data"]
 
 # run the app
 USER bun

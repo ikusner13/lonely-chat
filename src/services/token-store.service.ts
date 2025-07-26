@@ -1,4 +1,7 @@
 import { Database } from 'bun:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { createLogger } from '@/utils/logger';
 
 interface TokenRecord {
   bot_name: string;
@@ -14,10 +17,30 @@ interface TokenRecord {
 
 export class TokenStoreService {
   private db: Database;
+  private logger = createLogger('TokenStoreService');
 
   constructor(dbPath = process.env.TOKEN_DB_PATH || '/data/tokens.db') {
-    this.db = new Database(dbPath, { create: true });
-    this.initDatabase();
+    this.logger.info({ dbPath }, 'Initializing TokenStoreService');
+    
+    // Ensure the directory exists
+    const dir = dirname(dbPath);
+    try {
+      mkdirSync(dir, { recursive: true });
+      this.logger.debug({ dir }, 'Directory ensured');
+    } catch (error) {
+      // Directory might already exist or we might not have permissions
+      this.logger.warn({ error, dir }, 'Could not create directory, it may already exist');
+    }
+
+    try {
+      // SQLite will create the file if it doesn't exist with create: true
+      this.db = new Database(dbPath, { create: true });
+      this.initDatabase();
+      this.logger.info('Database initialized successfully');
+    } catch (error) {
+      this.logger.error({ error, dbPath }, 'Failed to open database');
+      throw error;
+    }
   }
 
   private initDatabase() {
