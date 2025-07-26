@@ -75,7 +75,8 @@ export class TokenManager {
         tokens.channel.refreshToken,
         'channel',
         new Date(tokens.channel.accessTokenExpiresAt),
-        tokens.channel.userId
+        tokens.channel.userId!,
+        tokens.channel.channelName!
       );
     }
 
@@ -87,7 +88,8 @@ export class TokenManager {
         tokenData.refreshToken,
         'bot',
         new Date(tokenData.accessTokenExpiresAt),
-        tokenData.userId
+        tokenData.userId!,
+        tokenData.channelName || botName
       );
     }
   }
@@ -181,7 +183,8 @@ export class TokenManager {
       merged.refreshToken,
       'channel',
       new Date(merged.accessTokenExpiresAt),
-      merged.userId
+      merged.userId!,
+      merged.channelName!
     );
   }
 
@@ -206,7 +209,8 @@ export class TokenManager {
       merged.refreshToken,
       'bot',
       new Date(merged.accessTokenExpiresAt),
-      merged.userId
+      merged.userId!,
+      merged.channelName || botName
     );
   }
 
