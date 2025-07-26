@@ -22,9 +22,9 @@ const tokenManager = new TokenManager({
 app.get('/health', (c) => c.text('OK', 200));
 
 // Root dashboard route
-app.get('/', async (c) => {
+app.get('/', (c) => {
   try {
-    const tokens = await tokenManager.loadTokens();
+    const tokens = tokenManager.loadTokens();
     return c.html(
       <Layout title="Twitch Bot Authentication">
         <Dashboard tokens={tokens} tunnelUrl={null} />
@@ -56,76 +56,33 @@ app.route('/auth/channel', channelRoutes);
 app.route('/auth/bot', botRoutes);
 app.route('/auth/moderator', moderatorRoutes);
 
-// Unified callback handler
+// Simple callback redirect based on state
 app.get('/callback', (c) => {
   const code = c.req.query('code');
   const state = c.req.query('state');
 
   if (!(code && state)) {
-    return c.html(
-      <Layout title="Authentication Error">
-        <div class="rounded-md border border-red-400 bg-red-100 p-4 text-red-700">
-          <h2 class="mb-2 font-semibold text-xl">Authentication Error</h2>
-          <p class="mb-4">Missing authorization code or state parameter.</p>
-          <a
-            class="inline-block rounded-md bg-purple-600 px-6 py-3 font-medium text-white no-underline transition-colors hover:bg-purple-700"
-            href="/"
-          >
-            Back to Dashboard
-          </a>
-        </div>
-      </Layout>
-    );
+    return c.redirect('/');
   }
 
-  // State contains the auth type and optional bot name
-  // Format: "channel" or "bot:botname" or "moderator:botname"
   const [authType, botName] = state.split(':');
-
-  // Create a new context with the code and state
-  const newRequest = new Request(
-    `${c.req.url.split('?')[0]}?code=${code}&state=${state}${botName ? `&botName=${botName}` : ''}`,
-    {
-      method: 'GET',
-      headers: c.req.raw.headers,
-    }
-  );
-
-  // Delegate to appropriate handler based on auth type
-  switch (authType) {
-    case 'channel':
-      return channelRoutes.fetch(newRequest, env, c.executionCtx);
-    case 'bot':
-      return botRoutes.fetch(newRequest, env, c.executionCtx);
-    case 'moderator':
-      return moderatorRoutes.fetch(newRequest, env, c.executionCtx);
-    default:
-      return c.html(
-        <Layout title="Invalid Authentication">
-          <div class="rounded-md border border-red-400 bg-red-100 p-4 text-red-700">
-            <h2 class="mb-2 font-semibold text-xl">
-              Invalid Authentication Type
-            </h2>
-            <p class="mb-4">Unknown authentication type: {authType}</p>
-            <a
-              class="inline-block rounded-md bg-purple-600 px-6 py-3 font-medium text-white no-underline transition-colors hover:bg-purple-700"
-              href="/"
-            >
-              Back to Dashboard
-            </a>
-          </div>
-        </Layout>
-      );
+  
+  // Redirect to the appropriate auth route callback
+  const params = new URLSearchParams({ code, state });
+  if (botName) {
+    params.append('botName', botName);
   }
+  
+  return c.redirect(`/auth/${authType}/callback?${params}`);
 });
 
 // Delete token endpoint
-app.delete('/tokens/:type/:name?', async (c) => {
+app.delete('/tokens/:type/:name?', (c) => {
   const type = c.req.param('type');
   const name = c.req.param('name');
 
   try {
-    const tokens = await tokenManager.loadTokens();
+    const tokens = tokenManager.loadTokens();
 
     if (type === 'channel') {
       // biome-ignore lint/performance/noDelete: fine
@@ -134,7 +91,7 @@ app.delete('/tokens/:type/:name?', async (c) => {
       delete tokens.bots[name];
     }
 
-    await tokenManager.saveTokens(tokens);
+    tokenManager.saveTokens(tokens);
     return c.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, 'Failed to delete token');
