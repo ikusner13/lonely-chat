@@ -7,6 +7,8 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - BOT_CONFIG_PATH=/bots.toml
+      - TOKEN_DB_PATH=/data/tokens.db
     volumes:
       - tokens-data:/data
       # set this in dokploy as a file mount
@@ -17,6 +19,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8080
+      - TOKEN_DB_PATH=/data/tokens.db
     env_file:
       - .env
     volumes:
