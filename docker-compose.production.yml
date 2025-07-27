@@ -1,0 +1,26 @@
+services:
+  twitch-bot:
+    image: ghcr.io/ikusner13/lonely-chat:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./config/bots.toml:/app/config/bots.toml:ro
+      - ./tokens.db:/app/tokens.db
+    depends_on:
+      - auth
+
+  auth:
+    image: ghcr.io/ikusner13/lonely-chat-auth:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    env_file:
+      - .env
+    volumes:
+      - ./tokens.db:/app/tokens.db

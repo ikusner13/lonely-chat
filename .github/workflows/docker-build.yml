@@ -55,23 +55,57 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        id: push
+      - name: Build and push Bot Docker image
+        id: push-bot
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate artifact attestation
+      - name: Extract Auth metadata
+        id: meta-auth
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-auth
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Auth Docker image
+        id: push-auth
+        uses: docker/build-push-action@v5
+        with:
+          context: ./auth
+          file: ./auth/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-auth.outputs.tags }}
+          labels: ${{ steps.meta-auth.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate Bot artifact attestation
         uses: actions/attest-build-provenance@v1
         if: ${{ github.event_name != 'pull_request' }}
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.push-bot.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate Auth artifact attestation
+        uses: actions/attest-build-provenance@v1
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}-auth
+          subject-digest: ${{ steps.push-auth.outputs.digest }}
           push-to-registry: true
 
       # Optional: Trigger Dokploy webhook after successful push
