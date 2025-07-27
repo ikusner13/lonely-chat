@@ -84,7 +84,7 @@ jobs:
         id: push-auth
         uses: docker/build-push-action@v5
         with:
-          context: ./auth
+          context: .
           file: ./auth/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-auth.outputs.tags }}
