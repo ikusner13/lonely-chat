@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
-import { env } from '@/env';
+import { env } from '@/shared/env';
 
 // const MODEL = 'moonshotai/kimi-k2:free';
 // const MODEL = 'mistralai/mistral-nemo:free';

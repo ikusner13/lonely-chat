@@ -1,5 +1,5 @@
 services:
-  twitch-bot:
+  lonely-chat:
     image: ghcr.io/ikusner13/lonely-chat:latest
     pull_policy: always
     restart: unless-stopped
@@ -9,15 +9,9 @@ services:
       - NODE_ENV=production
     volumes:
       - tokens-data:/data
+      # set this in dokploy as a file mount
       - ../files/bots.toml:/bots.toml:ro
-      # Note: In Dokploy, use Advanced → Mounts → Add File Mount
-      # 1. Go to Advanced → Mounts
-      # 2. Create a new File Mount
-      # 3. Name it: bots.toml
-      # 4. Add your bots.toml content
-      # The file will be created at /files/bots.toml and mounted to /bots.toml
-
-  auth:
+  lonely-chat-auth:
     image: ghcr.io/ikusner13/lonely-chat-auth:latest
     restart: unless-stopped
     environment:
