@@ -7,8 +7,14 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      - ../files/bots.toml:/app/config/bots.toml:ro
-      - ./tokens.db:/app/tokens.db
+      - tokens-data:/data
+      - ../files/bots.toml:/bots.toml:ro
+      # Note: In Dokploy, use Advanced → Mounts → Add File Mount
+      # 1. Go to Advanced → Mounts
+      # 2. Create a new File Mount
+      # 3. Name it: bots.toml
+      # 4. Add your bots.toml content
+      # The file will be created at /files/bots.toml and mounted to /bots.toml
 
   auth:
     image: ghcr.io/ikusner13/lonely-chat-auth:latest
@@ -19,4 +25,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./tokens.db:/app/tokens.db
+      - tokens-data:/data
+
+volumes:
+  tokens-data:
+    driver: local
