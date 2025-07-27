@@ -108,10 +108,10 @@ jobs:
           subject-digest: ${{ steps.push-auth.outputs.digest }}
           push-to-registry: true
 
-      # Optional: Trigger Dokploy webhook after successful push
       # - name: Trigger Dokploy Deployment
       #   if: ${{ github.event_name != 'pull_request' && success() }}
       #   run: |
-      #     curl -X POST ${{ secrets.DOKPLOY_WEBHOOK_URL }} \
+      #     curl -X POST "${{ secrets.DOKPLOY_URL }}/api/compose.redeploy" \
+      #       -H "Authorization: Bearer ${{ secrets.DOKPLOY_TOKEN }}" \
       #       -H "Content-Type: application/json" \
-      #       -d '{"image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"}'
+      #       -d '{"composeId": "${{ secrets.DOKPLOY_COMPOSE_ID }}"}'
