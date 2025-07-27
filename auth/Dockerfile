@@ -15,7 +15,6 @@ COPY --from=install /temp/dev/node_modules node_modules
 COPY package.json .
 COPY tsconfig.json .
 COPY auth/ auth/
-COPY src/services/token-json-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
 COPY src/services/sqlite-token-store.ts src/services/
 COPY src/utils/logger.ts src/utils/
