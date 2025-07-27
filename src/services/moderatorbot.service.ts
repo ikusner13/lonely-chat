@@ -48,8 +48,7 @@ export class ModeratorBotService extends EventEmitter<{
       const chatbot = await ChatbotService.create(
         tokenManager,
         botName,
-        config,
-        ['moderation']
+        config
       );
 
       const apiClient = new ApiClient({
@@ -120,7 +119,7 @@ export class ModeratorBotService extends EventEmitter<{
 
         const bannedUser = await bannedUsers[0]?.getUser();
 
-        this.logger.info({ user: bannedUser.displayName }, 'Banned user');
+        this.logger.info({ user: bannedUser?.displayName }, 'Banned user');
       });
     } catch (error) {
       this.logger.error(

@@ -10,9 +10,7 @@ async function main() {
   try {
     // Env is validated on import
     mainLogger.info(`Environment: ${env.NODE_ENV}`);
-    mainLogger.info(
-      `Database path: ${process.env.TOKEN_DB_PATH || './tokens.db'}`
-    );
+    mainLogger.info(`Database path: ${env.TOKEN_DB_PATH}`);
 
     app = new App();
     await app.start();

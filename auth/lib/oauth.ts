@@ -13,12 +13,7 @@ export const SCOPES = {
     'chat:edit',
     'moderator:manage:banned_users',
     'moderator:manage:chat_messages',
-    'moderator:manage:chat_settings',
-    'moderator:manage:shield_mode',
-    'moderator:manage:warnings',
     'moderator:read:chatters',
-    'moderator:read:shield_mode',
-    'moderator:read:followers',
   ],
 };
 
@@ -88,6 +83,10 @@ export async function getUserInfo(accessToken: string) {
       data: Array<{ id: string; login: string; display_name: string }>;
     };
     const user = data.data[0];
+
+    if (!user) {
+      throw new Error('No user found');
+    }
 
     return {
       userId: user.id,

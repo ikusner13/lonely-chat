@@ -66,13 +66,13 @@ app.get('/callback', (c) => {
   }
 
   const [authType, botName] = state.split(':');
-  
+
   // Redirect to the appropriate auth route callback
   const params = new URLSearchParams({ code, state });
   if (botName) {
     params.append('botName', botName);
   }
-  
+
   return c.redirect(`/auth/${authType}/callback?${params}`);
 });
 
@@ -99,8 +99,7 @@ app.delete('/tokens/:type/:name?', (c) => {
   }
 });
 
-// Start server
-const port = Number(process.env.PORT) || 8080;
+const port = Number(env.PORT) || 8080;
 
 logger.info(`Starting auth server on port ${port}`);
 

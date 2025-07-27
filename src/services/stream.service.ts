@@ -1,5 +1,4 @@
 import { ApiClient } from '@twurple/api';
-import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
 import { EventEmitter } from 'tseep';
 import { createLogger } from '@/utils/logger';

@@ -20,6 +20,7 @@ export const env = createEnv({
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
   onValidationError: (issues) => {
+    // biome-ignore lint/suspicious/noConsole: fine here
     console.error('❌ Invalid environment variables:', issues);
     throw new Error('Invalid environment variables');
   },

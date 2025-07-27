@@ -44,7 +44,7 @@ export class App {
     this.tokenManager = new TokenManager({
       clientId: env.TWITCH_CLIENT_ID,
       clientSecret: env.TWITCH_CLIENT_SECRET,
-      dbPath: process.env.TOKEN_DB_PATH || './tokens.db'
+      dbPath: env.TOKEN_DB_PATH,
     });
     this.ai = new AIService();
     this.messageWindow = new ChatMessageWindow();

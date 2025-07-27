@@ -24,10 +24,13 @@ export const env = createEnv({
       .optional()
       .default(false),
     NODE_ENV: z.enum(['development', 'production']).default('development'),
+    TOKEN_DB_PATH: z.string().default('./tokens.db'),
+    BOT_CONFIG_PATH: z.string().default('./config/bots.toml'),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
   onValidationError: (issues) => {
+    // biome-ignore lint/suspicious/noConsole: fine here
     console.error('❌ Invalid environment variables:', issues);
     throw new Error('Invalid environment variables');
   },

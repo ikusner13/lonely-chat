@@ -19,16 +19,11 @@ const tokenManager = new TokenManager({
   dbPath: env.TOKEN_DB_PATH,
 });
 
-// Global state for tunnel URL
 let tunnelUrl: string | null = null;
 let tunnel: localtunnel.Tunnel | null = null;
 
-// Remove jsxRenderer since we're using c.html() directly
-
-// Health check endpoint
 app.get('/health', (c) => c.text('OK', 200));
 
-// Root dashboard route
 app.get('/', async (c) => {
   try {
     const tokens = await tokenManager.loadTokens();
@@ -73,13 +68,13 @@ app.get('/callback', (c) => {
   }
 
   const [authType, botName] = state.split(':');
-  
+
   // Redirect to the appropriate auth route callback
   const params = new URLSearchParams({ code, state });
   if (botName) {
     params.append('botName', botName);
   }
-  
+
   return c.redirect(`/auth/${authType}/callback?${params}`);
 });
 

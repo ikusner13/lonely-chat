@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'tseep';
+import { env } from '@/env';
 import { createLogger } from '@/utils/logger';
 
 export interface BotConfig {
@@ -27,8 +28,7 @@ export class ConfigManager extends EventEmitter<{
 
   constructor(configPath?: string) {
     super();
-    this.configPath =
-      configPath || process.env.BOT_CONFIG_PATH || './config/bots.toml';
+    this.configPath = configPath ?? env.BOT_CONFIG_PATH;
   }
 
   async initialize(): Promise<void> {

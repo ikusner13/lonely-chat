@@ -4,7 +4,8 @@ import pino from 'pino';
 
 // Determine if we're in production
 const isProduction = process.env.NODE_ENV === 'production';
-const logLevel = process.env.LOG_LEVEL || 'info';
+// biome-ignore lint/complexity/useLiteralKeys: fine
+const logLevel = process.env['LOG_LEVEL'] || 'info';
 
 // Only create logs directory if not in production
 let logsDir: string | undefined;

@@ -1,14 +1,15 @@
 import { Database } from 'bun:sqlite';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { AccessToken } from '@twurple/auth';
-import { existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { env } from '@/env';
+import { createLogger } from '@/utils/logger';
 
 export class SQLiteTokenStore {
   private db: Database;
+  private logger = createLogger('SQLiteTokenStore');
 
-  constructor(
-    dbPath: string = process.env.TOKEN_DB_PATH || './data/tokens.db'
-  ) {
+  constructor(dbPath: string = env.TOKEN_DB_PATH) {
     // Ensure directory exists
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
@@ -46,7 +47,9 @@ export class SQLiteTokenStore {
     const query = this.db.query('SELECT * FROM tokens WHERE name = ?');
     const row = query.get(name) as any;
 
-    if (!row) return null;
+    if (!row) {
+      return null;
+    }
 
     return {
       accessToken: row.access_token,
@@ -116,16 +119,12 @@ export class SQLiteTokenStore {
   }
 
   // Bun SQLite transactions for atomic operations
-  async refreshTokenAtomic(
-    name: string,
-    token: AccessToken,
-    userId?: string
-  ): Promise<void> {
+  refreshTokenAtomic(name: string, token: AccessToken, userId?: string): void {
     this.db.transaction(() => {
       // Log the old token for audit
       const oldToken = this.getToken(name);
       if (oldToken) {
-        console.log(`Refreshing token for ${name}`);
+        this.logger.info({ name }, 'Refreshing token');
       }
 
       // Save new token

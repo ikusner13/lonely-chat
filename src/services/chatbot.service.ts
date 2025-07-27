@@ -28,8 +28,7 @@ export class ChatbotService {
   static async create(
     tokenManager: TokenManager,
     botName: string,
-    config: BotConfig,
-    additionalIntents: string[] = []
+    config: BotConfig
   ): Promise<ChatbotService> {
     try {
       const authProvider = await tokenManager.getAuthProvider(botName);
