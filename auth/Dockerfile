@@ -2,9 +2,6 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
-# Install curl for healthcheck (lighter than wget)
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
 # install dependencies into temp directory
 FROM base AS install
 RUN mkdir -p /temp/dev
@@ -22,10 +19,6 @@ COPY src/services/token-json-store.service.ts src/services/
 COPY src/services/token.service.ts src/services/
 COPY src/services/sqlite-token-store.ts src/services/
 COPY src/utils/logger.ts src/utils/
-
-# set production environment
-ENV NODE_ENV=production
-ENV TOKEN_JSON_PATH=/data/tokens.json
 
 # run the app as root to avoid permission issues with mounted volumes
 # USER bun

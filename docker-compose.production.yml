@@ -9,8 +9,6 @@ services:
     volumes:
       - ../files/bots.toml:/app/config/bots.toml:ro
       - ./tokens.db:/app/tokens.db
-    depends_on:
-      - auth
 
   auth:
     image: ghcr.io/ikusner13/lonely-chat-auth:latest

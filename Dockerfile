@@ -18,9 +18,6 @@ COPY tsconfig.json .
 COPY src/ src/
 COPY config/ config/
 
-# set production environment
-ENV NODE_ENV=production
-
 # run the app as root to avoid permission issues with mounted volumes
 # USER bun
 EXPOSE 3000/tcp
