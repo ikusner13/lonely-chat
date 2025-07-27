@@ -36,13 +36,57 @@ export class ConfigManager extends EventEmitter<{
     // Removed file watcher - causes issues with volume mounts in production
   }
 
+  private async findBotsToml(): Promise<string | null> {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    
+    const searchPaths = [
+      '/',
+      '/usr/src/app',
+      '/usr/src/app/config',
+      '/app',
+      '/app/config',
+      '/config',
+      '/files',
+      process.cwd()
+    ];
+    
+    this.logger.info('Searching for bots.toml file...');
+    
+    for (const searchPath of searchPaths) {
+      try {
+        const files = readdirSync(searchPath);
+        for (const file of files) {
+          if (file === 'bots.toml') {
+            const fullPath = join(searchPath, file);
+            this.logger.info(`Found bots.toml at: ${fullPath}`);
+            return fullPath;
+          }
+        }
+      } catch (e) {
+        // Directory might not exist or be accessible
+      }
+    }
+    
+    this.logger.error('bots.toml not found in any standard location');
+    return null;
+  }
+
   async loadConfig(): Promise<void> {
     try {
       // Check if file exists first
       if (!existsSync(this.configPath)) {
-        const errorMsg = `Configuration file not found: ${this.configPath}\n\nPlease ensure the bots.toml file exists at the specified path.\nFor Docker deployments, create the file via the Dokploy UI in Advanced → Mounts.`;
-        this.logger.error(errorMsg);
-        throw new Error(errorMsg);
+        // Try to find the file
+        const foundPath = await this.findBotsToml();
+        if (foundPath) {
+          this.logger.info(`Using found bots.toml at: ${foundPath}`);
+          this.logger.info(`You should set BOT_CONFIG_PATH=${foundPath}`);
+          this.configPath = foundPath;
+        } else {
+          const errorMsg = `Configuration file not found: ${this.configPath}\n\nPlease ensure the bots.toml file exists at the specified path.\nFor Docker deployments, create the file via the Dokploy UI in Advanced → Mounts.`;
+          this.logger.error(errorMsg);
+          throw new Error(errorMsg);
+        }
       }
 
       // Convert relative path to absolute for import
