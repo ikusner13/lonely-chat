@@ -1,6 +1,7 @@
 services:
   twitch-bot:
     image: ghcr.io/ikusner13/lonely-chat:latest
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
