@@ -1,194 +1,246 @@
-# Twitch Bot Service
+# Lonely Chat - AI-Powered Twitch Chat Bots
 
-A Twitch bot service that automatically connects/disconnects bots based on stream status using EventSub WebSocket.
+A sophisticated Twitch bot service that brings AI-powered personalities to your stream chat. Create a lively, engaging atmosphere with multiple bots that have distinct personalities, powered by various AI models through OpenRouter.
 
-## Features
+## 🌟 Key Features
 
-- **Stream-aware bot management**: Bots automatically connect when stream goes online and disconnect when offline
-- **Multi-bot support**: Manage multiple bots with different credentials
-- **Live config reloading**: Update bot settings without disconnecting (`npm run docker:reload`)
-- **Token management**: OAuth flow for generating and storing tokens
-- **EventSub WebSocket**: Real-time stream status monitoring
+### Smart Bot Management
+- **Automatic Stream Detection**: Bots connect when stream goes online, disconnect when offline
+- **Multi-Bot Support**: Run multiple bots simultaneously, each with unique personalities
+- **Natural Interactions**: Bots respond to mentions (@botname) and randomly participate (25% chance)
+- **Moderation Support**: Dedicated moderator bots with timeout capabilities
 
-## Setup
+### Advanced AI Integration
+- **Multiple AI Models**: Access to Llama, Claude, GPT-4, Gemini, and more via OpenRouter
+- **Context-Aware Responses**: Bots maintain chat context for natural conversations
+- **Personality System**: Each bot has customizable personality, temperature, and response style
+- **Fallback Models**: Automatic failover to alternative models if primary fails
 
-### 1. Install Dependencies
+### Live Configuration
+- **Hot Reload**: Update bot personalities without restarting or disconnecting
+- **No Downtime**: Changes apply instantly while bots stay connected
+- **Safe Updates**: Validation ensures bad configs don't crash your bots
+
+### Easy Token Management
+- **Unified Auth Dashboard**: Web interface for managing all tokens
+- **OAuth Flow**: Secure token generation with proper scopes
+- **Token Refresh**: Automatic and manual token refresh capabilities
+- **Visual Status**: See token health and expiration at a glance
+
+## 🚀 Quick Start
+
+### Prerequisites
+- [Bun](https://bun.sh) runtime installed
+- Twitch application credentials ([create one here](https://dev.twitch.tv/console/apps))
+- OpenRouter API key ([get one here](https://openrouter.ai))
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/yourusername/lonely-chat.git
+cd lonely-chat
+
+# Install dependencies
 bun install
+
+# Copy example config
+cp config/bots.toml.example config/bots.toml
 ```
 
-### 2. Configure Environment
+### Configuration
 
-Create a `.env` file with your Twitch app credentials and channel information:
-
+1. **Create `.env` file**:
 ```env
+# Twitch App Credentials
 TWITCH_CLIENT_ID=your_client_id
 TWITCH_CLIENT_SECRET=your_client_secret
-TWITCH_REDIRECT_URI=http://localhost:8080/callback
 
-# Your channel information for EventSub monitoring
+# Your Channel Info
 TWITCH_CHANNEL_ID=your_channel_user_id
 TWITCH_CHANNEL_NAME=your_channel_username
 
-# Required: Stable subdomain for localtunnel auth server
+# Auth Server (for development)
 LOCALTUNNEL_SUBDOMAIN=my-twitch-auth
 
-# OpenRouter API key for AI features
+# AI Provider
 OPENROUTER_KEY=your_openrouter_api_key
 ```
 
-You can find your user ID using the Twitch API or various online tools. The channel name is your Twitch username (without the # symbol).
+2. **Configure bots in `config/bots.toml`**:
+```toml
+[[bots]]
+name = "friendlybot"
+role = "chatter"
+model = "meta-llama/llama-3.1-8b-instruct:free"
+temperature = 0.9
+maxTokens = 100
+systemPrompt = "You are a friendly and supportive Twitch chat bot..."
+```
 
-### 3. Generate Tokens
-
-#### Using the Auth Dashboard (Recommended)
-
-The easiest way to manage tokens is through the unified auth dashboard:
+### Generate Tokens
 
 ```bash
+# Start the auth dashboard
 bun run auth
+
+# Visit http://localhost:8080
+# Generate tokens for:
+# - Your channel (for stream monitoring)
+# - Each bot account
+# - Moderator bots (if needed)
 ```
 
-This will:
-1. Start a local server at http://localhost:8080
-2. Create a secure tunnel for OAuth callbacks
-3. Open your browser to the auth dashboard
-
-From the dashboard you can:
-- Generate a channel token (for EventSub monitoring)
-- Add regular bot tokens (for chat participation)
-- Add moderator bot tokens (with timeout capabilities)
-- View token status and expiration times
-- Refresh expired tokens
-- Delete unused tokens
-
-**Important**: Make sure your Twitch app's redirect URI is set to the tunnel URL shown in the dashboard (e.g., `https://your-subdomain.loca.lt/callback`).
-
-##### Examples:
-
-**Adding a Channel Token:**
-1. Click "Generate Channel Token" on the dashboard
-2. Log in with your main Twitch channel account (not a bot account)
-3. Authorize the permissions
-4. The token will be saved and shown as "Active" in the Channel Token section
-
-**Adding a Regular Bot:**
-1. In the "Bot Tokens" section, enter a bot name (e.g., "funnybot") in the first input field
-2. Click "Add Regular Bot"
-3. Log in with the bot's Twitch account
-4. Authorize the permissions (chat:read, chat:edit)
-5. The bot will appear in your bot list with an "Active" status
-
-**Adding a Moderator Bot:**
-1. In the "Bot Tokens" section, enter a bot name (e.g., "modbot") in the second input field
-2. Click "Add Moderator Bot"
-3. Log in with the bot's Twitch account (must have moderator status in your channel)
-4. Authorize the permissions (includes moderator:manage:banned_users)
-5. The bot will appear with a shield icon 🛡️ indicating moderator capabilities
-
-#### Using Individual Scripts (Legacy)
-
-Alternatively, you can use the individual token generation scripts:
+### Run the Service
 
 ```bash
-# Generate channel token
-bun run generate-channel-token
-
-# Generate bot tokens
-bun run generate-token bot1
-bun run generate-token bot2
-
-# Generate moderator bot token
-bun run generate-moderator-token modbot
-```
-
-## Usage
-
-Start the service:
-
-```bash
+# Development
 bun run dev
+
+# Production with Docker
+docker compose -f docker-compose.production.yml up -d
 ```
 
-The service will:
-1. Connect to Twitch EventSub to monitor your channel
-2. When your stream goes online, all configured bots connect to chat
-3. When your stream goes offline, all bots disconnect
+## 📖 Architecture Overview
 
-## 🔄 Configuration Management
+### Service Architecture
 
-### Updating Bot Settings Without Restart
-
-You can update your bot configurations (prompts, temperature, models) without disconnecting them from Twitch!
-
-#### Quick Start
-
-1. **Edit your bot configuration:**
-   ```bash
-   nano config/bots.toml  # or use your favorite editor
-   ```
-
-2. **Apply the changes:**
-
-   **If using Docker (recommended):**
-   ```bash
-   npm run docker:reload
-   ```
-   
-   **Or manually:**
-   ```bash
-   docker compose kill -s HUP twitch-bot
-   ```
-
-   **For local development:**
-   ```bash
-   # Find the bot process
-   ps aux | grep "bun.*src/index.ts" | grep -v grep
-   # Note the PID (first number), then:
-   kill -HUP <PID>
-   ```
-
-3. **Verify the reload worked:**
-   ```bash
-   docker compose logs -f twitch-bot | grep -i "config"
-   # You should see: "✅ Configuration reloaded successfully"
-   ```
-
-### ✨ What You Can Change
-
-- Bot personalities (system prompts)
-- Temperature settings
-- AI models
-- Token limits
-- Fallback models
-- Any other bot configuration
-
-### 🛡️ Safe Reloading
-
-- **Bots stay connected** - No disconnection from Twitch
-- **Validation first** - Bad configs are rejected
-- **Keeps working config** - Errors don't crash your bots
-- **Instant updates** - Changes apply immediately
-
-### ⚠️ If Something Goes Wrong
-
-If your config has errors, you'll see in the logs:
 ```
-❌ Failed to reload configuration
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  StreamService  │────▶│ ChatListener     │────▶│ MessageWindow   │
+│  (EventSub)     │     │ (Single Reader)  │     │ (Context)       │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                                │                          │
+                                ▼                          ▼
+                        ┌───────────────┐         ┌────────────────┐
+                        │ BotManager    │────────▶│ AI Service     │
+                        │               │         │ (OpenRouter)   │
+                        └───────────────┘         └────────────────┘
+                                │
+                                ▼
+                        ┌───────────────┐
+                        │ ChatbotQueue  │
+                        │ (Rate Limit)  │
+                        └───────────────┘
+                                │
+                                ▼
+                        ┌───────────────┐
+                        │ Chatbot       │
+                        │ (Write Only)  │
+                        └───────────────┘
 ```
 
-The bots will continue using the last working configuration. Fix the error in your `bots.toml` and try again.
+### Key Components
 
-## Architecture
+- **StreamService**: Monitors stream status via EventSub WebSocket
+- **ChatListenerService**: Single connection that reads all chat messages
+- **ChatMessageWindow**: Maintains sliding window of recent messages for context
+- **BotResponseCoordinator**: Decides which bots should respond to messages
+- **AIService**: Generates responses using configured AI models
+- **ChatbotQueue**: Manages response timing and rate limiting
+- **BotManager**: Orchestrates bot lifecycle and connections
 
-- `src/index.ts` - Main entry point
-- `src/BotOrchestrator.ts` - Manages bots and EventSub monitoring
-- `src/scripts/generate-channel-token.ts` - OAuth flow for channel token generation
-- `src/scripts/generate-tokens.ts` - OAuth flow for bot token generation
-- `tokens.json` - Stores authentication tokens for channel and bots
+## 🛠️ Advanced Usage
 
-## Token Scopes
+### Live Configuration Updates
 
-- **Channel Token**: User token for EventSub WebSocket (no special scopes needed for stream.online/offline)
-- **Bot Tokens**: `chat:read`, `chat:edit` (for chat functionality)
+```bash
+# Edit your bot config
+nano config/bots.toml
+
+# Apply changes (Docker)
+docker compose kill -s HUP lonely-chat
+
+# Or for local development
+kill -HUP $(pgrep -f "bun.*src/index.ts")
+```
+
+### Docker Deployment
+
+```bash
+# Build images
+bun run docker:build
+
+# Start services
+bun run docker:up
+
+# View logs
+bun run docker:logs
+
+# Access container
+bun run docker:shell
+```
+
+### Available Scripts
+
+```bash
+bun run dev              # Start in development mode
+bun run dev:hot          # Start with hot reload
+bun run auth             # Start auth dashboard
+bun run playground       # Test AI responses
+bun run type-check       # TypeScript validation
+bun run lint             # Run linter
+bun run format           # Format code
+```
+
+## 🔧 Configuration Reference
+
+### Bot Configuration (bots.toml)
+
+```toml
+[[bots]]
+name = "botname"                    # Twitch username
+role = "chatter"                    # "chatter" or "moderator"
+model = "model-name"                # OpenRouter model ID
+temperature = 0.9                   # Response creativity (0.0-2.0)
+maxTokens = 100                     # Max response length
+fallbackModels = ["model1", "model2"] # Backup models
+introMessage = "Hello!"             # Optional intro message
+systemPrompt = """                  # Bot personality
+Your personality and behavior...
+"""
+```
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `TWITCH_CLIENT_ID` | Twitch app client ID | Yes |
+| `TWITCH_CLIENT_SECRET` | Twitch app client secret | Yes |
+| `TWITCH_CHANNEL_ID` | Your channel's user ID | Yes |
+| `TWITCH_CHANNEL_NAME` | Your channel username | Yes |
+| `OPENROUTER_KEY` | OpenRouter API key | Yes |
+| `LOCALTUNNEL_SUBDOMAIN` | Stable subdomain for auth | Development only |
+| `NODE_ENV` | Environment (development/production) | No |
+| `BOT_CONFIG_PATH` | Path to bots.toml | No (default: ./config/bots.toml) |
+| `TOKEN_DB_PATH` | Path to token database | No (default: ./tokens.db) |
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Bots not connecting**: Ensure stream is online and tokens are valid
+2. **No responses**: Check bot mentions format (@botname) and AI service logs
+3. **Token errors**: Regenerate tokens through auth dashboard
+4. **Config not updating**: Ensure proper SIGHUP signal is sent
+
+### Debug Mode
+
+Enable detailed logging:
+```bash
+LOG_LEVEL=debug bun run dev
+```
+
+## 📚 Resources
+
+- [Twitch Developer Documentation](https://dev.twitch.tv/docs)
+- [OpenRouter Documentation](https://openrouter.ai/docs)
+- [Bun Documentation](https://bun.sh/docs)

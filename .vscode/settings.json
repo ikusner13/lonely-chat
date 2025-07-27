@@ -25,7 +25,6 @@
     "**/.env.development.local": true,
     "**/.env.test.local": true,
     "**/.env.production.local": true,
-    "tokens.json": true,
     "**/node_modules": true
   }
 }
