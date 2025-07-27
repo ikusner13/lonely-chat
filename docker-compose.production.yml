@@ -7,7 +7,7 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      - ./config/bots.toml:/app/config/bots.toml:ro
+      - ../files/bots.toml:/app/config/bots.toml:ro
       - ./tokens.db:/app/tokens.db
     depends_on:
       - auth
