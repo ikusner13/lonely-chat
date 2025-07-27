@@ -37,9 +37,9 @@ export class ConfigManager extends EventEmitter<{
   }
 
   private async findBotsToml(): Promise<string | null> {
-    const { readdirSync, statSync } = await import('node:fs');
+    const { readdirSync } = await import('node:fs');
     const { join } = await import('node:path');
-    
+
     const searchPaths = [
       '/',
       '/usr/src/app',
@@ -48,26 +48,35 @@ export class ConfigManager extends EventEmitter<{
       '/app/config',
       '/config',
       '/files',
-      process.cwd()
+      process.cwd(),
     ];
-    
+
     this.logger.info('Searching for bots.toml file...');
-    
+    this.logger.info(`Current working directory: ${process.cwd()}`);
+
+    // First, let's see what's in each directory
     for (const searchPath of searchPaths) {
       try {
         const files = readdirSync(searchPath);
+        this.logger.info(
+          `Contents of ${searchPath}: ${files.slice(0, 10).join(', ')}${files.length > 10 ? '...' : ''}`
+        );
+
         for (const file of files) {
-          if (file === 'bots.toml') {
+          if (file === 'bots.toml' || file.includes('bots')) {
             const fullPath = join(searchPath, file);
-            this.logger.info(`Found bots.toml at: ${fullPath}`);
-            return fullPath;
+            this.logger.info(`Found bots-related file at: ${fullPath}`);
+            if (file === 'bots.toml') {
+              return fullPath;
+            }
           }
         }
-      } catch (e) {
+      } catch {
         // Directory might not exist or be accessible
+        this.logger.info(`Cannot access directory: ${searchPath}`);
       }
     }
-    
+
     this.logger.error('bots.toml not found in any standard location');
     return null;
   }
