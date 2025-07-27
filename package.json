@@ -3,20 +3,20 @@
   "scripts": {
     "dev:hot": "dotenv -e .env -- bun run --hot src/index.ts",
     "dev": "dotenv -e .env -- bun run src/index.ts",
-    "auth": "dotenv -e .env -- bun run auth/index.tsx",
+    "auth": "dotenv -e .env -- bun run auth/src/index.ts",
     "type-check": "tsc --noEmit",
     "lint": "npx ultracite lint",
     "format": "npx ultracite format",
     "playground": "bun run scripts/playground.ts",
     "build:main": "tsdown main/src/index.ts -d main/dist",
-    "build:auth": "tsdown auth/src/index.tsx -d auth/dist",
+    "build:auth": "tsdown auth/src/index.ts -d auth/dist",
     "build": "bun run build:main && bun run build:auth",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f",
-    "docker:restart": "docker compose restart",
-    "docker:shell": "docker compose exec twitch-bot sh"
+    "docker:build": "docker compose -f docker-compose.local.yml build",
+    "docker:up": "docker compose -f docker-compose.local.yml up -d",
+    "docker:down": "docker compose -f docker-compose.local.yml down",
+    "docker:logs": "docker compose -f docker-compose.local.yml logs -f",
+    "docker:restart": "docker compose -f docker-compose.local.yml restart",
+    "docker:shell": "docker compose -f docker-compose.local.yml exec lonely-chat sh"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.0.0-beta.2",

@@ -1,0 +1,42 @@
+services:
+  lonely-chat:
+    build:
+      context: .
+      dockerfile: main/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - tokens-data:/data
+      - ./config/bots.toml:/app/config/bots.toml:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - lonely-chat-network
+
+  lonely-chat-auth:
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+    env_file:
+      - .env
+    volumes:
+      - tokens-data:/data
+    ports:
+      - "8080:8080"
+    networks:
+      - lonely-chat-network
+
+volumes:
+  tokens-data:
+    driver: local
+
+networks:
+  lonely-chat-network:
+    driver: bridge
