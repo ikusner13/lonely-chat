@@ -29,12 +29,68 @@ A sophisticated Twitch bot service that brings AI-powered personalities to your 
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Option 1: Using Pre-built Docker Images (Recommended)
+
+The easiest way to get started is using the published Docker images from GitHub Container Registry.
+
+#### Prerequisites
+- Docker and Docker Compose installed
+- Twitch application credentials ([create one here](https://dev.twitch.tv/console/apps))
+- OpenRouter API key ([get one here](https://openrouter.ai))
+
+#### Quick Setup
+
+1. **Create a new directory for your deployment**:
+```bash
+mkdir lonely-chat && cd lonely-chat
+```
+
+2. **Create docker-compose.yml**:
+```yaml
+services:
+  lonely-chat:
+    image: ghcr.io/ikusner13/lonely-chat:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - BOT_CONFIG_PATH=/app/config/bots.toml
+      - TOKEN_DB_PATH=/data/tokens.db
+    volumes:
+      - tokens-data:/data
+      - ./bots.toml:/app/config/bots.toml:ro
+
+  lonely-chat-auth:
+    image: ghcr.io/ikusner13/lonely-chat-auth:latest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - TOKEN_DB_PATH=/data/tokens.db
+    env_file:
+      - .env
+    volumes:
+      - tokens-data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  tokens-data:
+    driver: local
+```
+
+3. **Continue with Configuration steps below**
+
+### Option 2: Building from Source
+
+#### Prerequisites
 - [Bun](https://bun.sh) runtime installed
 - Twitch application credentials ([create one here](https://dev.twitch.tv/console/apps))
 - OpenRouter API key ([get one here](https://openrouter.ai))
 
-### Installation
+#### Installation
 
 ```bash
 # Clone the repository
@@ -67,22 +123,30 @@ LOCALTUNNEL_SUBDOMAIN=my-twitch-auth
 OPENROUTER_KEY=your_openrouter_api_key
 ```
 
-2. **Configure bots in `config/bots.toml`**:
-```toml
-[[bots]]
-name = "friendlybot"
-role = "chatter"
-model = "meta-llama/llama-3.1-8b-instruct:free"
-temperature = 0.9
-maxTokens = 100
-systemPrompt = "You are a friendly and supportive Twitch chat bot..."
-```
+2. **Configure bots** (create `bots.toml` in your deployment directory):
+
+   Download example configuration:
+   ```bash
+   wget https://raw.githubusercontent.com/ikusner13/lonely-chat/main/config/bots.toml.example -O bots.toml
+   ```
+
+   Or create manually:
+   ```toml
+   [[bots]]
+   name = "friendlybot"
+   role = "chatter"
+   model = "meta-llama/llama-3.1-8b-instruct:free"
+   temperature = 0.9
+   maxTokens = 100
+   systemPrompt = "You are a friendly and supportive Twitch chat bot..."
+   ```
 
 ### Generate Tokens
 
+#### For Docker Users:
 ```bash
-# Start the auth dashboard
-bun run auth
+# Start the auth service
+docker compose up -d lonely-chat-auth
 
 # Visit http://localhost:8080
 # Generate tokens for:
@@ -91,8 +155,30 @@ bun run auth
 # - Moderator bots (if needed)
 ```
 
+#### For Source Users:
+```bash
+# Start the auth dashboard
+bun run auth
+
+# Visit http://localhost:8080
+# Generate tokens as above
+```
+
 ### Run the Service
 
+#### Docker (Recommended):
+```bash
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+#### From Source:
 ```bash
 # Development
 bun run dev
@@ -142,33 +228,101 @@ docker compose -f docker-compose.production.yml up -d
 
 ## 🛠️ Advanced Usage
 
+### Docker Deployment Guide
+
+#### Using Published Images
+
+The project publishes two Docker images to GitHub Container Registry:
+- `ghcr.io/ikusner13/lonely-chat:latest` - Main bot application
+- `ghcr.io/ikusner13/lonely-chat-auth:latest` - Auth dashboard for token management
+
+##### Complete Docker Setup
+
+1. **Directory Structure**:
+```
+lonely-chat/
+├── docker-compose.yml
+├── .env
+└── bots.toml
+```
+
+2. **docker-compose.yml** (production ready):
+```yaml
+services:
+  lonely-chat:
+    image: ghcr.io/ikusner13/lonely-chat:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - BOT_CONFIG_PATH=/app/config/bots.toml
+      - TOKEN_DB_PATH=/data/tokens.db
+    volumes:
+      - tokens-data:/data
+      - ./bots.toml:/app/config/bots.toml:ro
+    depends_on:
+      - lonely-chat-auth
+
+  lonely-chat-auth:
+    image: ghcr.io/ikusner13/lonely-chat-auth:latest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - TOKEN_DB_PATH=/data/tokens.db
+    env_file:
+      - .env
+    volumes:
+      - tokens-data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  tokens-data:
+    driver: local
+```
+
+3. **Volume Persistence**:
+   - Token database is stored in a named Docker volume
+   - Bot configuration is mounted from host filesystem
+   - Tokens persist across container restarts
+
+4. **Updating Images**:
+```bash
+# Pull latest images
+docker compose pull
+
+# Restart with new images
+docker compose up -d
+```
+
 ### Live Configuration Updates
 
 ```bash
 # Edit your bot config
-nano config/bots.toml
+nano bots.toml
 
-# Apply changes (Docker)
+# Apply changes without restart (Docker)
 docker compose kill -s HUP lonely-chat
 
 # Or for local development
 kill -HUP $(pgrep -f "bun.*src/index.ts")
 ```
 
-### Docker Deployment
+### Building Your Own Images
 
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/lonely-chat.git
+cd lonely-chat
+
 # Build images
 bun run docker:build
 
-# Start services
-bun run docker:up
-
-# View logs
-bun run docker:logs
-
-# Access container
-bun run docker:shell
+# Use docker-compose.local.yml for local builds
+docker compose -f docker-compose.local.yml up -d
 ```
 
 ### Available Scripts
@@ -232,11 +386,61 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 3. **Token errors**: Regenerate tokens through auth dashboard
 4. **Config not updating**: Ensure proper SIGHUP signal is sent
 
+### Docker-Specific Issues
+
+1. **Auth dashboard not accessible**:
+   - Ensure port 8080 is not already in use
+   - Check firewall settings
+   - Verify container is running: `docker compose ps`
+
+2. **Tokens not persisting**:
+   - Check volume is properly created: `docker volume ls`
+   - Ensure containers share the same volume
+   - Verify TOKEN_DB_PATH is set to `/data/tokens.db`
+
+3. **Configuration changes not applying**:
+   - Ensure bots.toml is in the correct location
+   - Check file permissions (must be readable)
+   - Use `docker compose exec lonely-chat cat /app/config/bots.toml` to verify
+
+4. **Container keeps restarting**:
+   - Check logs: `docker compose logs lonely-chat`
+   - Verify all environment variables are set
+   - Ensure .env file exists and is properly formatted
+
 ### Debug Mode
 
 Enable detailed logging:
+
+#### Docker:
+```bash
+# Add to docker-compose.yml environment section
+environment:
+  - LOG_LEVEL=debug
+```
+
+#### Development:
 ```bash
 LOG_LEVEL=debug bun run dev
+```
+
+### Useful Docker Commands
+
+```bash
+# View real-time logs
+docker compose logs -f
+
+# Check container status
+docker compose ps
+
+# Access container shell
+docker compose exec lonely-chat sh
+
+# Restart specific service
+docker compose restart lonely-chat
+
+# Clean restart (removes volumes - WARNING: deletes tokens!)
+docker compose down -v && docker compose up -d
 ```
 
 ## 📚 Resources
