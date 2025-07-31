@@ -24,7 +24,10 @@ app.get('/', (c) => {
   try {
     const tokens = tokenManager.loadTokens();
     // In production mode, we don't use tunnelUrl
-    const tunnelUrl = process.env.NODE_ENV === 'production' ? null : globalThis.tunnelUrl || null;
+    const tunnelUrl =
+      process.env.NODE_ENV === 'production'
+        ? null
+        : globalThis.tunnelUrl || null;
     return c.html(
       <Layout title="Twitch Bot Authentication">
         <Dashboard tokens={tokens} tunnelUrl={tunnelUrl} />
@@ -83,10 +86,10 @@ app.delete('/api/tokens/:type/:name?', (c) => {
   try {
     if (type === 'channel') {
       tokenManager.deleteToken('channel');
-    } else if (type === 'bot' && name) {
+    } else if ((type === 'bot' || type === 'moderator') && name) {
       tokenManager.deleteToken(name);
     }
-    
+
     return c.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, 'Failed to delete token');
