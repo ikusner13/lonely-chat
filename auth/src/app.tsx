@@ -83,17 +83,43 @@ app.post('/api/tokens/refresh/:type/:name', async (c) => {
 
 app.delete('/api/tokens/:type/:name?', (c) => {
   const { type, name } = c.req.param();
+  logger.info({ type, name }, 'DELETE /api/tokens/:type/:name? called');
+  
   try {
     if (type === 'channel') {
+      logger.info('Deleting channel token');
       tokenManager.deleteToken('channel');
+      logger.info('Channel token deleted successfully');
     } else if ((type === 'bot' || type === 'moderator') && name) {
+      logger.info({ type, name }, 'Deleting bot/moderator token');
       tokenManager.deleteToken(name);
+      logger.info({ type, name }, 'Bot/moderator token deleted successfully');
+    } else {
+      logger.warn({ type, name }, 'Invalid delete request - missing parameters');
+      return c.json({ success: false, error: 'Invalid parameters' }, 400);
     }
 
     return c.json({ success: true });
   } catch (error) {
-    logger.error({ err: error }, 'Failed to delete token');
+    logger.error({ err: error, type, name }, 'Failed to delete token');
     return c.json({ success: false, error: 'Failed to delete token' }, 500);
+  }
+});
+
+// Debug endpoint to check database contents
+app.get('/api/debug/tokens', (c) => {
+  try {
+    const tokens = tokenManager.getAllTokens();
+    const tokenInfo = tokens.map(({ name, token }) => ({
+      name,
+      hasAccessToken: !!token.accessToken,
+      hasRefreshToken: !!token.refreshToken,
+      scopes: token.scope,
+    }));
+    return c.json({ tokens: tokenInfo, count: tokens.length });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to get debug info');
+    return c.json({ error: 'Failed to get debug info' }, 500);
   }
 });
 

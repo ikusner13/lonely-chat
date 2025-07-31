@@ -102,8 +102,13 @@ export class SQLiteTokenStore {
   }
 
   deleteToken(name: string): void {
+    this.logger.info({ name }, 'Attempting to delete token from SQLite');
     const query = this.db.prepare('DELETE FROM tokens WHERE name = ?');
-    query.run(name);
+    const result = query.run(name);
+    this.logger.info({ name, changes: result.changes }, 'Delete query executed');
+    if (result.changes === 0) {
+      this.logger.warn({ name }, 'No token found to delete');
+    }
   }
 
   hasTokens(): boolean {

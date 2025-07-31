@@ -1,4 +1,3 @@
-import { html } from 'hono/html';
 import type { FC } from 'hono/jsx';
 import type { TokenData } from '@/shared/token.service';
 import { formatScopes, getTokenInfo } from '../lib/tokens';
@@ -88,34 +87,33 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
             Refresh Token
           </a>
         )}
-        {html`
-          <button
-            class="rounded-md bg-red-500 px-4 py-2 font-medium text-sm text-white transition-colors hover:bg-red-600"
-            onclick="
-              if (confirm('Delete ${type} token for ${name || 'channel'}?')) {
-                const url = '${type}' === 'channel' 
-                  ? '/api/tokens/channel' 
-                  : '/api/tokens/${type}/${name}';
-                  
-                fetch(url, { method: 'DELETE' })
-                  .then(response => {
-                    if (response.ok) {
-                      window.location.reload();
-                    } else {
-                      alert('Failed to delete token');
-                    }
-                  })
-                  .catch(error => {
-                    console.error('Error deleting token:', error);
-                    alert('Failed to delete token');
-                  });
-              }
-            "
-            type="button"
-          >
-            Delete
-          </button>
-        `}
+        <button
+          class="rounded-md bg-red-500 px-4 py-2 font-medium text-sm text-white transition-colors hover:bg-red-600"
+          onclick={`
+            if (confirm('Delete ${type} token for ${name || 'channel'}?')) {
+              const url = ${type === 'channel' ? `'/api/tokens/channel'` : `'/api/tokens/${type}/${name}'`};
+                
+              fetch(url, { method: 'DELETE' })
+                .then(response => {
+                  if (response.ok) {
+                    window.location.reload();
+                  } else {
+                    response.text().then(text => {
+                      console.error('Delete failed:', text);
+                      alert('Failed to delete token: ' + text);
+                    });
+                  }
+                })
+                .catch(error => {
+                  console.error('Error deleting token:', error);
+                  alert('Failed to delete token: ' + error.message);
+                });
+            }
+          `}
+          type="button"
+        >
+          Delete
+        </button>
       </div>
     </div>
   );
