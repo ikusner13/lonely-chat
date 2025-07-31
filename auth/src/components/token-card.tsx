@@ -91,7 +91,7 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
           class="rounded-md bg-red-500 px-4 py-2 font-medium text-sm text-white transition-colors hover:bg-red-600"
           onclick={`
             if (confirm('Delete ${type} token for ${name}?')) {
-              fetch('/tokens/${type}/${name}', { method: 'DELETE' })
+              fetch('/api/tokens/${type}/${name}', { method: 'DELETE' })
                 .then(() => window.location.reload());
             }
           `}

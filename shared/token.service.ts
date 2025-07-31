@@ -8,7 +8,7 @@ export interface TokenData {
   accessTokenExpiresAt: string;
   savedAt: string;
   scope: string[];
-  userId?: string;
+  userId?: string | null;
   channelName?: string;
 }
 
@@ -115,6 +115,19 @@ export class TokenManager {
     return this.tokenStore.getAllTokens();
   }
 
+  deleteToken(name: string): void {
+    this.tokenStore.deleteToken(name);
+    this.userIds.delete(name);
+    this.authProviders.delete(name);
+  }
+
+  async refreshToken(type: 'channel' | 'bot', name: string): Promise<void> {
+    const tokenName = type === 'channel' ? 'channel' : name;
+    const authProvider = await this.getAuthProvider(tokenName);
+    // Force a token refresh by getting current user
+    await authProvider.getCurrentUserId();
+  }
+
   close(): void {
     this.tokenStore.close();
   }
@@ -123,7 +136,6 @@ export class TokenManager {
   loadTokens(): TokenStorage {
     const allTokens = this.getAllTokens();
     const storage: TokenStorage = {
-      channel: undefined,
       bots: {},
     };
 
@@ -136,7 +148,7 @@ export class TokenManager {
         ).toISOString(),
         savedAt: new Date().toISOString(),
         scope: token.scope || [],
-        userId: this.getUserId(name) || undefined,
+        userId: this.getUserId(name),
         channelName: name,
       };
 

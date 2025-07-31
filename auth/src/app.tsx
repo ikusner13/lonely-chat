@@ -20,9 +20,9 @@ const tokenManager = new TokenManager({
 app.get('/health', (c) => c.text('OK', 200));
 
 // Dashboard
-app.get('/', async (c) => {
+app.get('/', (c) => {
   try {
-    const tokens = await tokenManager.loadTokens();
+    const tokens = tokenManager.loadTokens();
     // In production mode, we don't use tunnelUrl
     const tunnelUrl = process.env.NODE_ENV === 'production' ? null : globalThis.tunnelUrl || null;
     return c.html(
@@ -57,9 +57,9 @@ app.route('/auth/channel', channelRoutes);
 app.route('/auth/moderator', moderatorRoutes);
 
 // API endpoints
-app.get('/api/tokens', async (c) => {
+app.get('/api/tokens', (c) => {
   try {
-    const tokens = await tokenManager.loadTokens();
+    const tokens = tokenManager.loadTokens();
     return c.json(tokens);
   } catch (error) {
     logger.error({ err: error }, 'Failed to load tokens');
@@ -78,18 +78,15 @@ app.post('/api/tokens/refresh/:type/:name', async (c) => {
   }
 });
 
-app.delete('/api/tokens/:type/:name?', async (c) => {
+app.delete('/api/tokens/:type/:name?', (c) => {
   const { type, name } = c.req.param();
   try {
-    const tokens = await tokenManager.loadTokens();
-    
     if (type === 'channel') {
-      delete tokens.channel;
+      tokenManager.deleteToken('channel');
     } else if (type === 'bot' && name) {
-      delete tokens.bots[name];
+      tokenManager.deleteToken(name);
     }
     
-    await tokenManager.saveTokens(tokens);
     return c.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, 'Failed to delete token');
