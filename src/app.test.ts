@@ -24,6 +24,13 @@ const decodeBotListApiResponse: (input: unknown) => BotListApiResponse = Schema.
     bots: Schema.Array(Schema.Unknown),
   }),
 );
+const decodeBotPreviewApiResponse = Schema.decodeUnknownSync(
+  Schema.Struct({
+    model: Schema.String,
+    prompt: Schema.String,
+    response: Schema.String,
+  }),
+);
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -145,6 +152,33 @@ const requestBotForm = (
     method: "POST",
   });
 };
+
+const requestBotPreviewApi = (
+  app: ReturnType<typeof createApp>,
+  botId: string,
+  prompt: string,
+): Effect.Effect<Response> =>
+  requestApp(app, `http://localhost/api/bots/${botId}/preview`, {
+    body: JSON.stringify({
+      prompt,
+    }),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+
+const requestBotPreviewForm = (
+  app: ReturnType<typeof createApp>,
+  botId: string,
+  prompt: string,
+): Effect.Effect<Response> =>
+  requestApp(app, `http://localhost/bots/${botId}/preview`, {
+    body: new URLSearchParams({
+      prompt,
+    }),
+    method: "POST",
+  });
 
 const createStoredBot = async function createStoredBot(
   runtime: ReturnType<typeof makeAppRuntime>,
@@ -467,6 +501,65 @@ describe("app shell", () => {
       expect(body).toContain("Temperature must be a number between 0 and 2.");
       expect(body).toContain("Max tokens must be a positive integer.");
       expect(body).toContain("Maximum response length must be greater than or equal to minimum.");
+    }),
+  );
+
+  it.effect("previews a bot response through the preview api", () =>
+    Effect.gen(function* previewsABotResponseThroughThePreviewApi() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+      const storedBot = makeTestBot();
+
+      yield* Effect.promise(async () => {
+        await createStoredBot(runtime, storedBot);
+      });
+
+      const response = yield* requestBotPreviewApi(app, storedBot.id, "  why is chat screaming?  ");
+
+      expect(response.status).toBe(okStatus);
+
+      const body = yield* Effect.promise(async () => {
+        const payload = await response.json();
+
+        return decodeBotPreviewApiResponse(payload);
+      });
+
+      expect(body).toEqual({
+        model: "openai/gpt-5-mini",
+        prompt: "why is chat screaming?",
+        response: "Pixel: [fake:openai/gpt-5-mini] why is chat screaming?",
+      });
+    }),
+  );
+
+  it.effect("renders a preview response in the bot manager ui", () =>
+    Effect.gen(function* rendersAPreviewResponseInTheBotManagerUi() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+      const storedBot = makeTestBot();
+
+      yield* Effect.promise(async () => {
+        await createStoredBot(runtime, storedBot);
+      });
+
+      const response = yield* requestBotPreviewForm(
+        app,
+        storedBot.id,
+        "what happened to that split?",
+      );
+      const body = yield* Effect.promise(async () => {
+        const text = await response.text();
+
+        return text;
+      });
+
+      expect(response.status).toBe(okStatus);
+      expect(body).toContain("Preview Bot");
+      expect(body).toContain(
+        "Preview Response: Pixel: [fake:openai/gpt-5-mini] what happened to that split?",
+      );
     }),
   );
 });

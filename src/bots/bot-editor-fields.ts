@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Result from "effect/Result";
 
 import { BotId, BotPlatform, BotRecord } from "./bot-record";
 import type { BotPlatform as BotPlatformType } from "./bot-record";
@@ -116,10 +117,8 @@ interface ParsedBotEditorFieldsSuccess {
 
 export type ParsedBotEditorFields = ParsedBotEditorFieldsFailure | ParsedBotEditorFieldsSuccess;
 
-const decodeNonEmptyString: (input: unknown) => string = Schema.decodeUnknownSync(
-  Schema.NonEmptyString,
-);
-const decodeTalkativenessFromForm: (input: unknown) => number = Schema.decodeUnknownSync(
+const decodeNonEmptyString = Schema.decodeUnknownResult(Schema.NonEmptyString);
+const decodeTalkativenessFromForm = Schema.decodeUnknownResult(
   Schema.NumberFromString.pipe(
     Schema.check(
       Schema.isInt(),
@@ -130,7 +129,18 @@ const decodeTalkativenessFromForm: (input: unknown) => number = Schema.decodeUnk
     ),
   ),
 );
-const decodeTemperatureFromForm: (input: unknown) => number = Schema.decodeUnknownSync(
+const decodeTalkativenessFromFormSync: (input: unknown) => number = Schema.decodeUnknownSync(
+  Schema.NumberFromString.pipe(
+    Schema.check(
+      Schema.isInt(),
+      Schema.isBetween({
+        maximum: talkativenessMaximum,
+        minimum: talkativenessMinimum,
+      }),
+    ),
+  ),
+);
+const decodeTemperatureFromForm = Schema.decodeUnknownResult(
   Schema.NumberFromString.pipe(
     Schema.check(
       Schema.isBetween({
@@ -140,7 +150,28 @@ const decodeTemperatureFromForm: (input: unknown) => number = Schema.decodeUnkno
     ),
   ),
 );
-const decodePositiveIntegerFromForm: (input: unknown) => number = Schema.decodeUnknownSync(
+const decodeTemperatureFromFormSync: (input: unknown) => number = Schema.decodeUnknownSync(
+  Schema.NumberFromString.pipe(
+    Schema.check(
+      Schema.isBetween({
+        maximum: temperatureMaximum,
+        minimum: temperatureMinimum,
+      }),
+    ),
+  ),
+);
+const decodePositiveIntegerFromForm = Schema.decodeUnknownResult(
+  Schema.NumberFromString.pipe(
+    Schema.check(
+      Schema.isInt(),
+      Schema.isBetween({
+        maximum: positiveIntegerMaximum,
+        minimum: positiveIntegerMinimum,
+      }),
+    ),
+  ),
+);
+const decodePositiveIntegerFromFormSync: (input: unknown) => number = Schema.decodeUnknownSync(
   Schema.NumberFromString.pipe(
     Schema.check(
       Schema.isInt(),
@@ -212,45 +243,17 @@ const toOptionalString = (value: string): string | null => (value === "" ? null 
 const isBotPlatform = (value: string): value is BotPlatformType =>
   value === "kick" || value === "twitch";
 
-const canDecodeNonEmptyString = (value: string): boolean => {
-  try {
-    decodeNonEmptyString(value);
+const canDecodeNonEmptyString = (value: string): boolean =>
+  Result.isSuccess(decodeNonEmptyString(value));
 
-    return true;
-  } catch {
-    return false;
-  }
-};
+const canDecodeTalkativenessFromForm = (value: string): boolean =>
+  Result.isSuccess(decodeTalkativenessFromForm(value));
 
-const canDecodeTalkativenessFromForm = (value: string): boolean => {
-  try {
-    decodeTalkativenessFromForm(value);
+const canDecodeTemperatureFromForm = (value: string): boolean =>
+  Result.isSuccess(decodeTemperatureFromForm(value));
 
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const canDecodeTemperatureFromForm = (value: string): boolean => {
-  try {
-    decodeTemperatureFromForm(value);
-
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const canDecodePositiveIntegerFromForm = (value: string): boolean => {
-  try {
-    decodePositiveIntegerFromForm(value);
-
-    return true;
-  } catch {
-    return false;
-  }
-};
+const canDecodePositiveIntegerFromForm = (value: string): boolean =>
+  Result.isSuccess(decodePositiveIntegerFromForm(value));
 
 const hasValidExampleMessageCount = (value: string): boolean => {
   const exampleMessages = splitListValue(value)
@@ -406,19 +409,19 @@ export const parseBotEditorFields = (values: BotEditorFormValues): ParsedBotEdit
       .map(trimFormValue)
       .filter((entry) => entry.length > 0),
     firstMessage: toOptionalString(normalizedValues.firstMessage),
-    maxTokens: decodePositiveIntegerFromForm(normalizedValues.maxTokens),
+    maxTokens: decodePositiveIntegerFromFormSync(normalizedValues.maxTokens),
     model: normalizedValues.model,
     name: normalizedValues.name,
     personality: normalizedValues.personality,
     platform: normalizedValues.platform,
     postHistoryPrompt: toOptionalString(normalizedValues.postHistoryPrompt),
     responseLength: {
-      max: decodePositiveIntegerFromForm(normalizedValues.responseLengthMax),
-      min: decodePositiveIntegerFromForm(normalizedValues.responseLengthMin),
+      max: decodePositiveIntegerFromFormSync(normalizedValues.responseLengthMax),
+      min: decodePositiveIntegerFromFormSync(normalizedValues.responseLengthMin),
     },
     systemPrompt: toOptionalString(normalizedValues.systemPrompt),
-    talkativeness: decodeTalkativenessFromForm(normalizedValues.talkativeness),
-    temperature: decodeTemperatureFromForm(normalizedValues.temperature),
+    talkativeness: decodeTalkativenessFromFormSync(normalizedValues.talkativeness),
+    temperature: decodeTemperatureFromFormSync(normalizedValues.temperature),
     vocabularyRules: splitListValue(normalizedValues.vocabularyRules)
       .map(trimFormValue)
       .filter((entry) => entry.length > 0),

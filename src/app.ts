@@ -3,6 +3,13 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { Hono } from "hono";
 
+import { FakeAiClientLive } from "./ai/Layers/fake-ai-client";
+import {
+  makeBotPreviewRequest,
+  parseBotPreviewInput,
+  parseBotPreviewRequestBody,
+} from "./ai/bot-preview";
+import { AiClient } from "./ai/Services/ai-client";
 import {
   BotEditorFormValues,
   makeBotEditorFormValues,
@@ -22,11 +29,17 @@ import type { SessionRecord } from "./sessions/session-record";
 
 const badRequestStatus = 400;
 const redirectSeeOtherStatus = 303;
-type AppServices = BotService | SessionService;
+type AppServices = AiClient | BotService | SessionService;
 
 interface BotFormState {
   readonly errors: BotEditorFormErrors;
   readonly values: BotEditorFormValues;
+}
+
+interface BotPreviewState {
+  readonly error?: string;
+  readonly prompt: string;
+  readonly response: string | null;
 }
 
 const formatActiveDuration = (startedAt: string): string => {
@@ -110,6 +123,22 @@ const makeBotFormState = (
   errors,
   values,
 });
+
+const makeBotPreviewState = (
+  prompt = "",
+  response: string | null = null,
+  error?: string,
+): BotPreviewState =>
+  error === undefined
+    ? {
+        prompt,
+        response,
+      }
+    : {
+        error,
+        prompt,
+        response,
+      };
 
 const renderFieldError = (error: string | undefined): string =>
   error === undefined ? "" : `<p>${escapeHtml(error)}</p>`;
@@ -260,9 +289,27 @@ const renderBotEditorForm = (
           <button type="submit">${submitLabel}</button>
         </form>`;
 
+const renderBotPreview = (
+  botId: string,
+  previewState: BotPreviewState,
+): string => `<form action="/bots/${botId}/preview" method="post">
+              <label>
+                Preview Prompt
+                <textarea name="prompt" rows="3">${escapeHtml(previewState.prompt)}</textarea>
+              </label>
+              ${renderFieldError(previewState.error)}
+              <button type="submit">Preview Bot</button>
+            </form>
+            ${
+              previewState.response === null
+                ? ""
+                : `<p>Preview Response: ${escapeHtml(previewState.response)}</p>`
+            }`;
+
 const renderBotList = (
   bots: readonly BotRecord[],
   editForms: ReadonlyMap<string, BotFormState>,
+  previewStates: ReadonlyMap<string, BotPreviewState>,
 ): string => {
   if (bots.length === 0) {
     return "<p>No bots configured yet.</p>";
@@ -273,6 +320,7 @@ const renderBotList = (
         .map((bot) => {
           const editFormState =
             editForms.get(bot.id) ?? makeBotFormState(makeBotEditorFormValues(bot));
+          const previewState = previewStates.get(bot.id) ?? makeBotPreviewState();
 
           return `<li>
             <strong>${escapeHtml(bot.displayName)}</strong> (@${escapeHtml(bot.name)})<br />
@@ -285,6 +333,10 @@ const renderBotList = (
               <summary>Edit bot</summary>
               ${renderBotEditorForm(`/bots/${bot.id}`, "Save Bot", editFormState)}
             </details>
+            <details>
+              <summary>Preview bot</summary>
+              ${renderBotPreview(bot.id, previewState)}
+            </details>
           </li>`;
         })
         .join("")}
@@ -295,6 +347,7 @@ const renderBotManagerDocument = (
   bots: readonly BotRecord[],
   createForm: BotFormState,
   editForms: ReadonlyMap<string, BotFormState>,
+  previewStates: ReadonlyMap<string, BotPreviewState>,
 ): string => `<!doctype html>
 <html lang="en">
   <head>
@@ -315,46 +368,49 @@ const renderBotManagerDocument = (
       </section>
       <section>
         <h2>Bot List</h2>
-        ${renderBotList(bots, editForms)}
+        ${renderBotList(bots, editForms, previewStates)}
       </section>
     </main>
   </body>
 </html>`;
 
-const loadDashboardState = async (
-  runtime: ManagedRuntime.ManagedRuntime<AppServices, unknown>,
-): Promise<{
-  readonly activeSession: SessionRecord | null;
-  readonly mostRecentSession: SessionRecord | null;
-}> => {
-  const dashboardState = await runtime.runPromise(
-    Effect.all({
-      activeSession: SessionService.use((sessionService) => sessionService.getActiveSession()),
-      mostRecentSession: SessionService.use((sessionService) =>
-        sessionService.getMostRecentSession(),
-      ),
-    }),
+const loadDashboardState = Effect.fn("App.loadDashboardState")(function* loadDashboardState() {
+  return yield* Effect.all({
+    activeSession: SessionService.use((sessionService) => sessionService.getActiveSession()),
+    mostRecentSession: SessionService.use((sessionService) =>
+      sessionService.getMostRecentSession(),
+    ),
+  });
+});
+
+const loadBots = Effect.fn("App.loadBots")(function* loadBots() {
+  return yield* BotService.use((botService) => botService.listBots());
+});
+
+const loadBot = Effect.fn("App.loadBot")(function* loadBot(botId: BotId) {
+  return yield* BotService.use((botService) => botService.getBot(botId));
+});
+
+const previewBot = Effect.fn("App.previewBot")(function* previewBot(
+  bot: BotRecord,
+  prompt: string,
+) {
+  const parsedPreviewInput = parseBotPreviewInput(prompt);
+  const previewInput = parsedPreviewInput.input;
+
+  if (previewInput === null) {
+    return yield* Effect.fail(new Error(parsedPreviewInput.error ?? "Preview prompt is required."));
+  }
+
+  const preview = yield* AiClient.use((aiClient) =>
+    aiClient.generateText(makeBotPreviewRequest(bot, previewInput)),
   );
 
-  return dashboardState;
-};
-
-const loadBots = async function loadBots(
-  runtime: ManagedRuntime.ManagedRuntime<AppServices, unknown>,
-): Promise<readonly BotRecord[]> {
-  const bots = await runtime.runPromise(BotService.use((botService) => botService.listBots()));
-
-  return bots;
-};
-
-const loadBot = async function loadBot(
-  runtime: ManagedRuntime.ManagedRuntime<AppServices, unknown>,
-  botId: BotId,
-): Promise<BotRecord | null> {
-  const bot = await runtime.runPromise(BotService.use((botService) => botService.getBot(botId)));
-
-  return bot;
-};
+  return {
+    model: preview.model,
+    response: preview.text,
+  };
+});
 
 const readStringFormField = (formData: FormData, fieldName: string): string => {
   const value = formData.get(fieldName);
@@ -417,6 +473,7 @@ export const makeAppRuntime = (
 
   return ManagedRuntime.make(
     Layer.empty.pipe(
+      Layer.provideMerge(FakeAiClientLive),
       Layer.provideMerge(SessionServiceLive),
       Layer.provideMerge(BotServiceLive),
       Layer.provide(databaseLayer),
@@ -438,13 +495,13 @@ export const createApp = (
   );
 
   app.get("/", async (context) => {
-    const { activeSession, mostRecentSession } = await loadDashboardState(runtime);
+    const { activeSession, mostRecentSession } = await runtime.runPromise(loadDashboardState());
 
     return context.html(renderDashboardDocument(activeSession, mostRecentSession));
   });
 
   app.get("/api/bots", async (context) => {
-    const bots = await loadBots(runtime);
+    const bots = await runtime.runPromise(loadBots());
 
     return context.json({
       bots: bots.map(serializeBot),
@@ -452,11 +509,45 @@ export const createApp = (
   });
 
   app.get("/bots", async (context) => {
-    const bots = await loadBots(runtime);
+    const bots = await runtime.runPromise(loadBots());
 
     return context.html(
-      renderBotManagerDocument(bots, makeBotFormState(makeEmptyBotEditorFormValues()), new Map()),
+      renderBotManagerDocument(
+        bots,
+        makeBotFormState(makeEmptyBotEditorFormValues()),
+        new Map(),
+        new Map(),
+      ),
     );
+  });
+
+  app.post("/api/bots/:botId/preview", async (context) => {
+    const botId = BotId.makeUnsafe(context.req.param("botId"));
+    const bot = await runtime.runPromise(loadBot(botId));
+
+    if (bot === null) {
+      return context.notFound();
+    }
+
+    const parsedInput = parseBotPreviewRequestBody(await context.req.json().catch(() => null));
+    const previewInput = parsedInput.input;
+
+    if (previewInput === null) {
+      return context.json(
+        {
+          error: parsedInput.error ?? "Preview prompt is required.",
+        },
+        badRequestStatus,
+      );
+    }
+
+    const preview = await runtime.runPromise(previewBot(bot, previewInput.prompt));
+
+    return context.json({
+      model: preview.model,
+      prompt: previewInput.prompt,
+      response: preview.response,
+    });
   });
 
   app.post("/bots", async (context) => {
@@ -464,12 +555,13 @@ export const createApp = (
     const parsedForm = parseBotEditorFields(formValues);
 
     if (parsedForm.editorFields === null) {
-      const bots = await loadBots(runtime);
+      const bots = await runtime.runPromise(loadBots());
 
       return context.html(
         renderBotManagerDocument(
           bots,
           makeBotFormState(parsedForm.values, parsedForm.errors),
+          new Map(),
           new Map(),
         ),
         badRequestStatus,
@@ -489,7 +581,7 @@ export const createApp = (
 
   app.post("/bots/:botId", async (context) => {
     const botId = BotId.makeUnsafe(context.req.param("botId"));
-    const existingBot = await loadBot(runtime, botId);
+    const existingBot = await runtime.runPromise(loadBot(botId));
 
     if (existingBot === null) {
       return context.notFound();
@@ -499,13 +591,18 @@ export const createApp = (
     const parsedForm = parseBotEditorFields(formValues);
 
     if (parsedForm.editorFields === null) {
-      const bots = await loadBots(runtime);
+      const bots = await runtime.runPromise(loadBots());
       const editForms = new Map<string, BotFormState>([
         [existingBot.id, makeBotFormState(parsedForm.values, parsedForm.errors)],
       ]);
 
       return context.html(
-        renderBotManagerDocument(bots, makeBotFormState(makeEmptyBotEditorFormValues()), editForms),
+        renderBotManagerDocument(
+          bots,
+          makeBotFormState(makeEmptyBotEditorFormValues()),
+          editForms,
+          new Map(),
+        ),
         badRequestStatus,
       );
     }
@@ -523,6 +620,43 @@ export const createApp = (
     );
 
     return context.redirect("/bots", redirectSeeOtherStatus);
+  });
+
+  app.post("/bots/:botId/preview", async (context) => {
+    const botId = BotId.makeUnsafe(context.req.param("botId"));
+    const bot = await runtime.runPromise(loadBot(botId));
+
+    if (bot === null) {
+      return context.notFound();
+    }
+
+    const parsedInput = parseBotPreviewInput(
+      readStringFormField(await context.req.formData(), "prompt"),
+    );
+    const bots = await runtime.runPromise(loadBots());
+
+    if (parsedInput.input === null) {
+      return context.html(
+        renderBotManagerDocument(
+          bots,
+          makeBotFormState(makeEmptyBotEditorFormValues()),
+          new Map(),
+          new Map([[bot.id, makeBotPreviewState(parsedInput.value, null, parsedInput.error)]]),
+        ),
+        badRequestStatus,
+      );
+    }
+
+    const preview = await runtime.runPromise(previewBot(bot, parsedInput.input.prompt));
+
+    return context.html(
+      renderBotManagerDocument(
+        bots,
+        makeBotFormState(makeEmptyBotEditorFormValues()),
+        new Map(),
+        new Map([[bot.id, makeBotPreviewState(parsedInput.input.prompt, preview.response)]]),
+      ),
+    );
   });
 
   app.post("/session/start", async (context) => {

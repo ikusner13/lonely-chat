@@ -60,7 +60,7 @@ Use it with:
 - Spec inputs: `specs/bots.md`, `specs/data.md`, `specs/technical-ai.md`
 - Verify: schema tests, JSON field persistence tests, `vp check`, targeted `vp test`
 
-### [ ] VS-04: Bot preview with fake AI
+### [x] VS-04: Bot preview with fake AI
 
 - Depends on: `VS-03`, `TB-03`
 - Outcome: A user can preview a bot response in the UI using deterministic fake AI output.
