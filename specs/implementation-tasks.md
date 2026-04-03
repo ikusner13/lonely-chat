@@ -76,7 +76,7 @@ Use it with:
 - Spec inputs: `specs/data.md`, `specs/technical-effect.md`, `specs/platforms.md`
 - Verify: session/message repository tests, mock adapter persistence integration test, `vp check`, targeted `vp test`
 
-### [ ] VS-06: Stream live chat into the Chat Viewer
+### [x] VS-06: Stream live chat into the Chat Viewer
 
 - Depends on: `VS-05`
 - Outcome: Messages from the mock adapter appear live in `/chat` and match persisted session history.

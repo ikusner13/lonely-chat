@@ -8,7 +8,7 @@ MODEL="${CODEX_MODEL:-gpt-5.4}"
 REASONING="${CODEX_REASONING:-high}"
 SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
 AGENT_TIMEOUT_SECONDS="${CODEX_AGENT_TIMEOUT_SECONDS:-900}"
-MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-3}"
+MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-6}"
 MAX_ITERATIONS=0
 RUN_PACK=false
 NO_COMMIT=false
@@ -78,7 +78,7 @@ Options:
   --service-tier <tier>   Override service tier (default: fast)
   --agent-timeout-seconds Stop a single Codex run after n seconds (default: 900)
   --max-attempts-per-slice
-                         Stop after n unfinished attempts on the same slice (default: 3)
+                         Stop after n unfinished attempts on the same slice (default: 6)
   --help                  Show this message
 EOF
       exit 0

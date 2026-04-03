@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -6,9 +8,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createApp, makeAppRuntime } from "./app";
+import { FakeAiClientLive } from "./ai/Layers/fake-ai-client";
 import { BotEditorFormValues } from "./bots/bot-editor-fields";
+import { BotServiceLive } from "./bots/Layers/bot-service";
 import { BotRecord, BotId } from "./bots/bot-record";
 import { BotService } from "./bots/Services/bot-service";
+import { makeDatabaseLayer } from "./db/database";
+import { makeMockPlatformAdapter } from "./platforms/Layers/mock-platform-adapter";
+import { ChannelName, ChatUsername, PlatformAdapter } from "./platforms/Services/platform-adapter";
+import { SessionServiceLive } from "./sessions/Layers/session-service";
+import { SessionService } from "./sessions/Services/session-service";
 
 const okStatus = 200;
 const seeOtherStatus = 303;
@@ -31,6 +40,20 @@ const decodeBotPreviewApiResponse = Schema.decodeUnknownSync(
     response: Schema.String,
   }),
 );
+const decodeChatStreamMessage = Schema.decodeUnknownSync(
+  Schema.Struct({
+    botId: Schema.NullOr(Schema.String),
+    content: Schema.String,
+    id: Schema.String,
+    isBot: Schema.Boolean,
+    modelUsed: Schema.NullOr(Schema.String),
+    platform: Schema.String,
+    sentAt: Schema.String,
+    sessionId: Schema.String,
+    tokensUsed: Schema.NullOr(Schema.Number),
+    username: Schema.String,
+  }),
+);
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -51,6 +74,34 @@ const createTestRuntime = (dbPath: string) =>
   Effect.acquireRelease(
     Effect.sync(() => makeAppRuntime(dbPath)),
     (runtime) =>
+      Effect.promise(async () => {
+        await runtime.dispose();
+      }).pipe(Effect.orDie),
+  );
+
+const createTestRuntimeWithMockPlatform = (dbPath: string) =>
+  Effect.acquireRelease(
+    Effect.gen(function* createRuntimeWithMockPlatformEffect() {
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const runtime = ManagedRuntime.make(
+        Layer.empty.pipe(
+          Layer.provideMerge(FakeAiClientLive),
+          Layer.provideMerge(SessionServiceLive.pipe(Layer.provideMerge(platformLayer))),
+          Layer.provideMerge(BotServiceLive),
+          Layer.provide(makeDatabaseLayer(dbPath)),
+        ),
+      ) as ReturnType<typeof makeAppRuntime>;
+
+      return {
+        mockPlatformAdapter,
+        runtime,
+      };
+    }),
+    ({ runtime }) =>
       Effect.promise(async () => {
         await runtime.dispose();
       }).pipe(Effect.orDie),
@@ -117,6 +168,71 @@ const requestApp = (
 
     return response;
   });
+
+const waitForChatViewerMessage = (
+  app: ReturnType<typeof createApp>,
+  messageText: string,
+  remainingAttempts = 20,
+): Effect.Effect<string> =>
+  Effect.gen(function* waitForChatViewerMessageEffect() {
+    const response = yield* requestApp(app, "http://localhost/chat");
+    const body = yield* Effect.promise(async () => {
+      const text = await response.text();
+
+      return text;
+    });
+
+    if (body.includes(messageText) || remainingAttempts <= 1) {
+      return body;
+    }
+
+    yield* Effect.sleep("10 millis");
+
+    return yield* waitForChatViewerMessage(app, messageText, remainingAttempts - 1);
+  });
+
+const readFirstServerSentEvent = async function readFirstServerSentEvent(
+  response: Response,
+): Promise<string> {
+  if (response.body === null) {
+    throw new Error("Expected a streaming response body.");
+  }
+
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+
+      if (chunk.done) {
+        throw new Error("The event stream closed before any data arrived.");
+      }
+
+      buffer += decoder.decode(chunk.value, {
+        stream: true,
+      });
+
+      const eventBoundary = buffer.indexOf("\n\n");
+
+      if (eventBoundary === -1) {
+        continue;
+      }
+
+      const frame = buffer.slice(0, eventBoundary);
+      const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+
+      if (dataLine !== undefined) {
+        return dataLine.slice("data: ".length);
+      }
+
+      buffer = buffer.slice(eventBoundary + 2);
+    }
+  } finally {
+    await reader.cancel();
+  }
+};
 
 const requestBotForm = (
   app: ReturnType<typeof createApp>,
@@ -264,6 +380,60 @@ describe("app shell", () => {
       expect(stoppedBody).toContain("Status: idle");
       expect(stoppedBody).toContain("Last session ended: manual");
       expect(stoppedBody).toContain("Start Session");
+    }),
+  );
+
+  it.effect("renders persisted chat history and streams live chat updates", () =>
+    Effect.gen(function* rendersPersistedChatHistoryAndStreamsLiveChatUpdates() {
+      const dbPath = yield* createDatabasePath;
+      const { mockPlatformAdapter, runtime } = yield* createTestRuntimeWithMockPlatform(dbPath);
+      const app = createApp(runtime);
+
+      yield* Effect.promise(async () => {
+        await runtime.runPromise(
+          SessionService.use((sessionService) => sessionService.startSession()),
+        );
+      });
+      yield* Effect.yieldNow;
+      yield* mockPlatformAdapter.emitIncomingMessage({
+        channel: ChannelName.makeUnsafe("lonely-chat"),
+        text: "hello from live chat",
+        username: ChatUsername.makeUnsafe("viewer-1"),
+      });
+
+      const body = yield* waitForChatViewerMessage(app, "hello from live chat");
+
+      expect(body).toContain("Chat Viewer");
+      expect(body).toContain("hello from live chat");
+      expect(body).toContain("viewer-1");
+      expect(body).toContain("/api/chat/stream");
+
+      const streamResponse = yield* requestApp(app, "http://localhost/api/chat/stream");
+
+      expect(streamResponse.status).toBe(okStatus);
+
+      const streamedMessage = Effect.promise(async () => {
+        const payload = await readFirstServerSentEvent(streamResponse);
+
+        return decodeChatStreamMessage(JSON.parse(payload) as unknown);
+      });
+
+      yield* Effect.yieldNow;
+      yield* mockPlatformAdapter.emitIncomingMessage({
+        channel: ChannelName.makeUnsafe("lonely-chat"),
+        text: "second live line",
+        username: ChatUsername.makeUnsafe("viewer-2"),
+      });
+
+      expect(yield* streamedMessage).toEqual(
+        expect.objectContaining({
+          botId: null,
+          content: "second live line",
+          isBot: false,
+          platform: "mock",
+          username: "viewer-2",
+        }),
+      );
     }),
   );
 

@@ -1,7 +1,10 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Stream from "effect/Stream";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 
 import { FakeAiClientLive } from "./ai/Layers/fake-ai-client";
 import {
@@ -26,6 +29,7 @@ import { getDatabasePath, makeDatabaseLayer } from "./db/database";
 import { MockPlatformAdapterLive } from "./platforms/Layers/mock-platform-adapter";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
+import type { SessionMessageRecord } from "./sessions/session-message-record";
 import type { SessionRecord } from "./sessions/session-record";
 
 const badRequestStatus = 400;
@@ -41,6 +45,12 @@ interface BotPreviewState {
   readonly error?: string;
   readonly prompt: string;
   readonly response: string | null;
+}
+
+interface ChatViewerState {
+  readonly activeSession: SessionRecord | null;
+  readonly messages: readonly SessionMessageRecord[];
+  readonly selectedSession: SessionRecord | null;
 }
 
 const formatActiveDuration = (startedAt: string): string => {
@@ -99,6 +109,7 @@ const renderDashboardDocument = (
       <h1>Lonely Chat</h1>
       <p>Dashboard for managing mock stream chat sessions.</p>
       <nav>
+        <a href="/chat">Chat Viewer</a>
         <a href="/bots">Bot Manager</a>
       </nav>
       <section>
@@ -116,6 +127,9 @@ const escapeHtml = (value: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+
+const serializeForInlineScript = (value: unknown): string =>
+  JSON.stringify(value).replaceAll("<", "\\u003c");
 
 const makeBotFormState = (
   values: BotEditorFormValues,
@@ -362,6 +376,7 @@ const renderBotManagerDocument = (
       <p>Configured bots for mock and live chat sessions.</p>
       <nav>
         <a href="/">Dashboard</a>
+        <a href="/chat">Chat Viewer</a>
       </nav>
       <section>
         <h2>Create Bot</h2>
@@ -382,6 +397,27 @@ const loadDashboardState = Effect.fn("App.loadDashboardState")(function* loadDas
       sessionService.getMostRecentSession(),
     ),
   });
+});
+
+const loadChatViewerState = Effect.fn("App.loadChatViewerState")(function* loadChatViewerState() {
+  const activeSession = yield* SessionService.use((sessionService) =>
+    sessionService.getActiveSession(),
+  );
+  const selectedSession =
+    activeSession ??
+    (yield* SessionService.use((sessionService) => sessionService.getMostRecentSession()));
+  const messages =
+    selectedSession === null
+      ? ([] as const)
+      : yield* SessionService.use((sessionService) =>
+          sessionService.getSessionMessages(selectedSession.id),
+        );
+
+  return {
+    activeSession,
+    messages,
+    selectedSession,
+  } satisfies ChatViewerState;
 });
 
 const loadBots = Effect.fn("App.loadBots")(function* loadBots() {
@@ -467,6 +503,136 @@ const serializeBot = (bot: BotRecord) => ({
   vocabularyRules: [...bot.vocabularyRules],
 });
 
+const serializeSession = (session: SessionRecord) => ({
+  channel: session.channel,
+  endReason: session.endReason,
+  endedAt: session.endedAt,
+  id: session.id,
+  platform: session.platform,
+  startedAt: session.startedAt,
+  status: session.status,
+});
+
+const serializeSessionMessage = (message: SessionMessageRecord) => ({
+  botId: message.botId,
+  content: message.content,
+  id: message.id,
+  isBot: message.isBot,
+  modelUsed: message.modelUsed,
+  platform: message.platform,
+  sentAt: message.sentAt,
+  sessionId: message.sessionId,
+  tokensUsed: message.tokensUsed,
+  username: message.username,
+});
+
+const renderChatMessageListItem = (
+  message: SessionMessageRecord,
+): string => `<li data-session-message-id="${message.id}">
+          <strong>${escapeHtml(message.username)}</strong> (${message.isBot ? "bot" : "viewer"}, ${escapeHtml(message.platform)})<br />
+          ${escapeHtml(message.content)}<br />
+          <small>${escapeHtml(message.sentAt)}</small>
+        </li>`;
+
+const renderChatViewerDocument = (state: ChatViewerState): string => {
+  let sessionHeading = "No Session History";
+
+  if (state.activeSession !== null) {
+    sessionHeading = "Active Session";
+  } else if (state.selectedSession !== null) {
+    sessionHeading = "Most Recent Session";
+  }
+
+  const sessionDetails =
+    state.selectedSession === null
+      ? "<p>No chat session history is available yet.</p>"
+      : `<p>Status: ${escapeHtml(state.selectedSession.status)}</p>
+        <p>Platform: ${escapeHtml(state.selectedSession.platform)}</p>
+        <p>Channel: ${escapeHtml(state.selectedSession.channel)}</p>`;
+  const messagesMarkup =
+    state.messages.length === 0
+      ? '<li id="chat-empty">No messages captured for this session yet.</li>'
+      : state.messages.map(renderChatMessageListItem).join("");
+  const initialState = serializeForInlineScript({
+    activeSession: state.activeSession === null ? null : serializeSession(state.activeSession),
+    messages: state.messages.map(serializeSessionMessage),
+  });
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lonely Chat Chat Viewer</title>
+  </head>
+  <body>
+    <main>
+      <h1>Chat Viewer</h1>
+      <p>Live mock chat plus persisted session history.</p>
+      <nav>
+        <a href="/">Dashboard</a>
+        <a href="/bots">Bot Manager</a>
+      </nav>
+      <section>
+        <h2>${sessionHeading}</h2>
+        ${sessionDetails}
+      </section>
+      <section>
+        <h2>Messages</h2>
+        <ul id="chat-messages">
+          ${messagesMarkup}
+        </ul>
+      </section>
+    </main>
+    <script>
+      const chatState = ${initialState};
+      const activeSession = chatState.activeSession;
+      const messagesList = document.getElementById("chat-messages");
+      const createMessageItem = (message) => {
+        const item = document.createElement("li");
+        item.dataset.sessionMessageId = message.id;
+
+        const name = document.createElement("strong");
+        name.textContent = message.username;
+        item.appendChild(name);
+        item.append(" (" + (message.isBot ? "bot" : "viewer") + ", " + message.platform + ")");
+        item.appendChild(document.createElement("br"));
+        item.append(message.content);
+        item.appendChild(document.createElement("br"));
+
+        const time = document.createElement("small");
+        time.textContent = message.sentAt;
+        item.appendChild(time);
+
+        return item;
+      };
+
+      if (activeSession !== null && messagesList !== null) {
+        const source = new EventSource("/api/chat/stream");
+        source.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+
+          if (message.sessionId !== activeSession.id) {
+            return;
+          }
+
+          const existing = document.querySelector('[data-session-message-id="' + message.id + '"]');
+
+          if (existing !== null) {
+            return;
+          }
+
+          document.getElementById("chat-empty")?.remove();
+          messagesList.appendChild(createMessageItem(message));
+        };
+
+        window.addEventListener("beforeunload", () => source.close(), { once: true });
+      }
+    </script>
+  </body>
+</html>`;
+};
+
 export const makeAppRuntime = (
   dbPath: string,
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
@@ -500,6 +666,59 @@ export const createApp = (
     const { activeSession, mostRecentSession } = await runtime.runPromise(loadDashboardState());
 
     return context.html(renderDashboardDocument(activeSession, mostRecentSession));
+  });
+
+  app.get("/chat", async (context) => {
+    const chatViewerState = await runtime.runPromise(loadChatViewerState());
+
+    return context.html(renderChatViewerDocument(chatViewerState));
+  });
+
+  app.get("/api/chat/stream", async (context) => {
+    const activeSession = await runtime.runPromise(
+      SessionService.use((sessionService) => sessionService.getActiveSession()),
+    );
+
+    if (activeSession === null) {
+      return context.notFound();
+    }
+
+    context.header("Cache-Control", "no-cache, no-transform");
+    context.header("X-Accel-Buffering", "no");
+    context.header("X-Content-Type-Options", "nosniff");
+
+    return streamSSE(context, async (stream) => {
+      let stopped = false;
+      const liveMessagesFiber = runtime.runFork(
+        SessionService.use((sessionService) =>
+          sessionService.liveMessages.pipe(
+            Stream.filter((message) => message.sessionId === activeSession.id),
+            Stream.runForEach((message) =>
+              Effect.promise(async () => {
+                await stream.writeSSE({
+                  data: JSON.stringify(serializeSessionMessage(message)),
+                });
+              }),
+            ),
+          ),
+        ),
+      );
+
+      const stop = async function stopStream(): Promise<void> {
+        if (stopped) {
+          return;
+        }
+
+        stopped = true;
+        await runtime.runPromise(Fiber.interrupt(liveMessagesFiber));
+      };
+
+      stream.onAbort(() => {
+        void stop().catch(() => {});
+      });
+
+      await runtime.runPromise(Fiber.await(liveMessagesFiber));
+    });
   });
 
   app.get("/api/bots", async (context) => {

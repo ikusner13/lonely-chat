@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -90,7 +92,7 @@ const loadStoredSessionMessages = (
 
       return yield* sql<StoredSessionMessageRow>`SELECT session_id, bot_id, username, content, platform, is_bot
         FROM session_messages
-        ORDER BY sent_at ASC, id ASC`;
+        ORDER BY sent_at ASC, rowid ASC`;
     }),
   );
 
@@ -210,6 +212,61 @@ describe("session service", () => {
           status: "ended",
         },
       ]);
+    }),
+  );
+
+  it.effect("bridges persisted live chat messages into the live message stream", () =>
+    Effect.gen(function* bridgesPersistedLiveChatMessagesIntoTheLiveMessageStream() {
+      const dbPath = yield* createDatabasePath;
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const sessionLayer = SessionServiceLive.pipe(
+        Layer.provideMerge(platformLayer),
+        Layer.provideMerge(makeDatabaseLayer(dbPath)),
+      );
+
+      const streamedMessage = yield* Effect.gen(function* exerciseLiveMessageBridge() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+
+        const liveMessagesFiber = yield* sessionService.liveMessages.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* Effect.yieldNow;
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hello from the live bridge",
+          username: ChatUsername.makeUnsafe("viewer-stream"),
+        });
+
+        const [firstMessage] = [...(yield* Fiber.join(liveMessagesFiber))];
+
+        expect(firstMessage).toBeDefined();
+
+        yield* sessionService.stopSession();
+
+        return firstMessage ?? null;
+      }).pipe(Effect.provide(sessionLayer));
+
+      const [storedMessage] = yield* waitForStoredSessionMessages(dbPath, 1);
+
+      expect(streamedMessage).toEqual(
+        expect.objectContaining({
+          botId: null,
+          content: "hello from the live bridge",
+          isBot: false,
+          platform: "mock",
+          sessionId: storedMessage?.session_id ?? "",
+          username: "viewer-stream",
+        }),
+      );
     }),
   );
 
