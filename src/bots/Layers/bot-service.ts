@@ -63,6 +63,16 @@ const makeBotRecord = (row: BotRow): BotRecord =>
     vocabularyRules: parseStringArray(row.vocabulary_rules),
   });
 
+const selectFirstBot = (rows: readonly BotRow[]): BotRecord | null => {
+  const [bot] = rows;
+
+  if (bot === undefined) {
+    return null;
+  }
+
+  return makeBotRecord(bot);
+};
+
 export const BotServiceLive = Layer.effect(
   BotService,
   Effect.gen(function* makeBotService() {
@@ -119,6 +129,36 @@ export const BotServiceLive = Layer.effect(
       return bot;
     });
 
+    const getBot = Effect.fn("BotService.getBot")(function* getBotEffect(id: BotId) {
+      const rows = yield* sql<BotRow>`SELECT
+          id,
+          name,
+          display_name,
+          platform,
+          model,
+          fallback_models,
+          temperature,
+          max_tokens,
+          personality,
+          description,
+          example_messages,
+          first_message,
+          post_history_prompt,
+          vocabulary_rules,
+          response_length_min,
+          response_length_max,
+          talkativeness,
+          system_prompt,
+          enabled,
+          created_at,
+          updated_at
+        FROM bots
+        WHERE id = ${id}
+        LIMIT 1`;
+
+      return selectFirstBot(rows);
+    });
+
     const listBots = Effect.fn("BotService.listBots")(function* listBotsEffect() {
       const rows = yield* sql<BotRow>`SELECT
           id,
@@ -148,9 +188,37 @@ export const BotServiceLive = Layer.effect(
       return rows.map(makeBotRecord);
     });
 
+    const updateBot = Effect.fn("BotService.updateBot")(function* updateBotEffect(bot: BotRecord) {
+      yield* sql`UPDATE bots
+        SET name = ${bot.name},
+            display_name = ${bot.displayName},
+            platform = ${bot.platform},
+            model = ${bot.model},
+            fallback_models = ${JSON.stringify(bot.fallbackModels)},
+            temperature = ${bot.temperature},
+            max_tokens = ${bot.maxTokens},
+            personality = ${bot.personality},
+            description = ${bot.description},
+            example_messages = ${JSON.stringify(bot.exampleMessages)},
+            first_message = ${bot.firstMessage},
+            post_history_prompt = ${bot.postHistoryPrompt},
+            vocabulary_rules = ${JSON.stringify(bot.vocabularyRules)},
+            response_length_min = ${bot.responseLength.min},
+            response_length_max = ${bot.responseLength.max},
+            talkativeness = ${bot.talkativeness},
+            system_prompt = ${bot.systemPrompt},
+            enabled = ${bot.enabled ? 1 : 0},
+            updated_at = ${bot.updatedAt}
+        WHERE id = ${bot.id}`;
+
+      return yield* getBot(bot.id);
+    });
+
     return BotService.of({
       createBot,
+      getBot,
       listBots,
+      updateBot,
     } satisfies BotServiceShape);
   }),
 );

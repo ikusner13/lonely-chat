@@ -21,6 +21,8 @@ interface StoredBotRow {
   readonly model: string;
   readonly name: string;
   readonly platform: string;
+  readonly talkativeness: number;
+  readonly updated_at: string;
 }
 
 const createDatabasePath = Effect.acquireRelease(
@@ -50,7 +52,7 @@ const loadStoredBots = (dbPath: string): Effect.Effect<readonly StoredBotRow[], 
     Effect.gen(function* queryStoredBots() {
       const sql = yield* SqlClient.SqlClient;
 
-      return yield* sql<StoredBotRow>`SELECT name, display_name, platform, model, enabled, fallback_models
+      return yield* sql<StoredBotRow>`SELECT name, display_name, platform, model, enabled, fallback_models, talkativeness, updated_at
         FROM bots
         ORDER BY created_at ASC`;
     }),
@@ -107,6 +109,65 @@ describe("bot service", () => {
           model: "openai/gpt-5-mini",
           name: "mod_bot",
           platform: "twitch",
+          talkativeness: 40,
+          updated_at: updatedAt,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("updates persisted core bot fields", () =>
+    Effect.gen(function* updatesPersistedCoreBotFields() {
+      const dbPath = yield* createDatabasePath;
+      const botLayer = BotServiceLive.pipe(Layer.provide(makeDatabaseLayer(dbPath)));
+      const bot = makeTestBot();
+
+      const updatedBot = yield* Effect.gen(function* exerciseBotUpdate() {
+        const botService = yield* BotService;
+
+        yield* botService.createBot(bot);
+
+        return yield* botService.updateBot(
+          new BotRecord({
+            createdAt: bot.createdAt,
+            description: bot.description,
+            displayName: "ModBotPrime",
+            enabled: false,
+            exampleMessages: [...bot.exampleMessages],
+            fallbackModels: [...bot.fallbackModels],
+            firstMessage: bot.firstMessage,
+            id: bot.id,
+            maxTokens: bot.maxTokens,
+            model: "anthropic/claude-3.7-sonnet",
+            name: bot.name,
+            personality: bot.personality,
+            platform: "kick",
+            postHistoryPrompt: bot.postHistoryPrompt,
+            responseLength: bot.responseLength,
+            systemPrompt: bot.systemPrompt,
+            talkativeness: 12,
+            temperature: bot.temperature,
+            updatedAt: "2026-04-03T00:00:02.000Z",
+            vocabularyRules: [...bot.vocabularyRules],
+          }),
+        );
+      }).pipe(Effect.provide(botLayer));
+
+      expect(updatedBot).not.toBeNull();
+      expect(updatedBot?.displayName).toBe("ModBotPrime");
+      expect(updatedBot?.enabled).toBe(false);
+      expect(updatedBot?.platform).toBe("kick");
+      expect(updatedBot?.talkativeness).toBe(12);
+      expect(yield* loadStoredBots(dbPath)).toEqual([
+        {
+          display_name: "ModBotPrime",
+          enabled: 0,
+          fallback_models: JSON.stringify(["openai/gpt-4.1-mini"]),
+          model: "anthropic/claude-3.7-sonnet",
+          name: "mod_bot",
+          platform: "kick",
+          talkativeness: 12,
+          updated_at: "2026-04-03T00:00:02.000Z",
         },
       ]);
     }),

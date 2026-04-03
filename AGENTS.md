@@ -93,6 +93,12 @@ At the end of an implementation run, report:
 
 Always run `effect-solutions show <topic>` before writing Effect code. Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
 
+Hard requirement: heavily lean on `Schema` and Effect data modeling when adding or changing application data shapes.
+
+- Prefer `Schema`-backed models over plain TypeScript interfaces for domain objects, validated inputs, persisted records, request/response payloads, form data, and cross-service data contracts.
+- Prefer schema-driven decoding and validation over manual object-shape checks when the data can reasonably be modeled with `Schema`.
+- Use plain TypeScript objects only for trivial render-only view state or glue code that does not cross a boundary and does not benefit from validation or shared modeling.
+
 <!-- effect-solutions:start -->
 
 ### Service definition

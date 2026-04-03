@@ -3,16 +3,30 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { Hono } from "hono";
 
+import {
+  makeBotCoreFieldFormValues,
+  makeBotRecordFromCoreFields,
+  makeEmptyBotCoreFieldFormValues,
+  parseBotCoreFields,
+} from "./bots/bot-core-fields";
 import { BotServiceLive } from "./bots/Layers/bot-service";
 import { BotService } from "./bots/Services/bot-service";
+import { BotId } from "./bots/bot-record";
+import type { BotCoreFieldFormErrors, BotCoreFieldFormValues } from "./bots/bot-core-fields";
 import type { BotRecord } from "./bots/bot-record";
 import { getDatabasePath, makeDatabaseLayer } from "./db/database";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
 import type { SessionRecord } from "./sessions/session-record";
 
+const badRequestStatus = 400;
 const redirectSeeOtherStatus = 303;
 type AppServices = BotService | SessionService;
+
+interface BotFormState {
+  readonly errors: BotCoreFieldFormErrors;
+  readonly values: BotCoreFieldFormValues;
+}
 
 const formatActiveDuration = (startedAt: string): string => {
   const durationMilliseconds = Math.max(0, Date.now() - Date.parse(startedAt));
@@ -80,26 +94,119 @@ const renderDashboardDocument = (
   </body>
 </html>`;
 
-const renderBotList = (bots: readonly BotRecord[]): string => {
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const makeBotFormState = (
+  values: BotCoreFieldFormValues,
+  errors: BotCoreFieldFormErrors = {},
+): BotFormState => ({
+  errors,
+  values,
+});
+
+const renderFieldError = (error: string | undefined): string =>
+  error === undefined ? "" : `<p>${escapeHtml(error)}</p>`;
+
+const renderPlatformOptions = (platform: string): string => `<option value="twitch"${
+  platform === "twitch" ? " selected" : ""
+}>twitch</option>
+          <option value="kick"${platform === "kick" ? " selected" : ""}>kick</option>`;
+
+const renderBotEditorForm = (
+  action: string,
+  submitLabel: string,
+  formState: BotFormState,
+): string => `<form action="${action}" method="post">
+          <label>
+            Name
+            <input name="name" type="text" value="${escapeHtml(formState.values.name)}" />
+          </label>
+          ${renderFieldError(formState.errors.name)}
+          <label>
+            Display Name
+            <input
+              name="displayName"
+              type="text"
+              value="${escapeHtml(formState.values.displayName)}"
+            />
+          </label>
+          ${renderFieldError(formState.errors.displayName)}
+          <label>
+            Platform
+            <select name="platform">
+              ${renderPlatformOptions(formState.values.platform)}
+            </select>
+          </label>
+          ${renderFieldError(formState.errors.platform)}
+          <label>
+            Model
+            <input name="model" type="text" value="${escapeHtml(formState.values.model)}" />
+          </label>
+          ${renderFieldError(formState.errors.model)}
+          <label>
+            Talkativeness
+            <input
+              name="talkativeness"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="${escapeHtml(formState.values.talkativeness)}"
+            />
+          </label>
+          ${renderFieldError(formState.errors.talkativeness)}
+          <label>
+            <input
+              name="enabled"
+              type="checkbox"
+              ${formState.values.enabled ? "checked" : ""}
+            />
+            Enabled
+          </label>
+          <button type="submit">${submitLabel}</button>
+        </form>`;
+
+const renderBotList = (
+  bots: readonly BotRecord[],
+  editForms: ReadonlyMap<string, BotFormState>,
+): string => {
   if (bots.length === 0) {
     return "<p>No bots configured yet.</p>";
   }
 
   return `<ul>
       ${bots
-        .map(
-          (bot) => `<li>
-            <strong>${bot.displayName}</strong> (@${bot.name})<br />
-            Platform: ${bot.platform}<br />
-            Model: ${bot.model}<br />
-            Enabled: ${bot.enabled ? "yes" : "no"}
-          </li>`,
-        )
+        .map((bot) => {
+          const editFormState =
+            editForms.get(bot.id) ?? makeBotFormState(makeBotCoreFieldFormValues(bot));
+
+          return `<li>
+            <strong>${escapeHtml(bot.displayName)}</strong> (@${escapeHtml(bot.name)})<br />
+            Platform: ${escapeHtml(bot.platform)}<br />
+            Model: ${escapeHtml(bot.model)}<br />
+            Enabled: ${bot.enabled ? "yes" : "no"}<br />
+            Talkativeness: ${bot.talkativeness}
+            <details>
+              <summary>Edit core fields</summary>
+              ${renderBotEditorForm(`/bots/${bot.id}`, "Save Bot", editFormState)}
+            </details>
+          </li>`;
+        })
         .join("")}
     </ul>`;
 };
 
-const renderBotManagerDocument = (bots: readonly BotRecord[]): string => `<!doctype html>
+const renderBotManagerDocument = (
+  bots: readonly BotRecord[],
+  createForm: BotFormState,
+  editForms: ReadonlyMap<string, BotFormState>,
+): string => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -114,8 +221,12 @@ const renderBotManagerDocument = (bots: readonly BotRecord[]): string => `<!doct
         <a href="/">Dashboard</a>
       </nav>
       <section>
+        <h2>Create Bot</h2>
+        ${renderBotEditorForm("/bots", "Create Bot", createForm)}
+      </section>
+      <section>
         <h2>Bot List</h2>
-        ${renderBotList(bots)}
+        ${renderBotList(bots, editForms)}
       </section>
     </main>
   </body>
@@ -146,6 +257,30 @@ const loadBots = async function loadBots(
 
   return bots;
 };
+
+const loadBot = async function loadBot(
+  runtime: ManagedRuntime.ManagedRuntime<AppServices, unknown>,
+  botId: BotId,
+): Promise<BotRecord | null> {
+  const bot = await runtime.runPromise(BotService.use((botService) => botService.getBot(botId)));
+
+  return bot;
+};
+
+const readStringFormField = (formData: FormData, fieldName: string): string => {
+  const value = formData.get(fieldName);
+
+  return typeof value === "string" ? value : "";
+};
+
+const readBotFormValues = (formData: FormData): BotCoreFieldFormValues => ({
+  displayName: readStringFormField(formData, "displayName"),
+  enabled: formData.get("enabled") === "on",
+  model: readStringFormField(formData, "model"),
+  name: readStringFormField(formData, "name"),
+  platform: readStringFormField(formData, "platform"),
+  talkativeness: readStringFormField(formData, "talkativeness"),
+});
 
 const serializeBot = (bot: BotRecord) => ({
   createdAt: bot.createdAt,
@@ -217,7 +352,79 @@ export const createApp = (
   app.get("/bots", async (context) => {
     const bots = await loadBots(runtime);
 
-    return context.html(renderBotManagerDocument(bots));
+    return context.html(
+      renderBotManagerDocument(
+        bots,
+        makeBotFormState(makeEmptyBotCoreFieldFormValues()),
+        new Map(),
+      ),
+    );
+  });
+
+  app.post("/bots", async (context) => {
+    const formValues = readBotFormValues(await context.req.formData());
+    const parsedForm = parseBotCoreFields(formValues);
+
+    if (parsedForm.coreFields === null) {
+      const bots = await loadBots(runtime);
+
+      return context.html(
+        renderBotManagerDocument(
+          bots,
+          makeBotFormState(parsedForm.values, parsedForm.errors),
+          new Map(),
+        ),
+        badRequestStatus,
+      );
+    }
+
+    await runtime.runPromise(
+      BotService.use((botService) =>
+        botService.createBot(
+          makeBotRecordFromCoreFields(parsedForm.coreFields, new Date().toISOString()),
+        ),
+      ),
+    );
+
+    return context.redirect("/bots", redirectSeeOtherStatus);
+  });
+
+  app.post("/bots/:botId", async (context) => {
+    const botId = BotId.makeUnsafe(context.req.param("botId"));
+    const existingBot = await loadBot(runtime, botId);
+
+    if (existingBot === null) {
+      return context.notFound();
+    }
+
+    const formValues = readBotFormValues(await context.req.formData());
+    const parsedForm = parseBotCoreFields(formValues);
+
+    if (parsedForm.coreFields === null) {
+      const bots = await loadBots(runtime);
+      const editForms = new Map<string, BotFormState>([
+        [existingBot.id, makeBotFormState(parsedForm.values, parsedForm.errors)],
+      ]);
+
+      return context.html(
+        renderBotManagerDocument(
+          bots,
+          makeBotFormState(makeEmptyBotCoreFieldFormValues()),
+          editForms,
+        ),
+        badRequestStatus,
+      );
+    }
+
+    await runtime.runPromise(
+      BotService.use((botService) =>
+        botService.updateBot(
+          makeBotRecordFromCoreFields(parsedForm.coreFields, new Date().toISOString(), existingBot),
+        ),
+      ),
+    );
+
+    return context.redirect("/bots", redirectSeeOtherStatus);
   });
 
   app.post("/session/start", async (context) => {

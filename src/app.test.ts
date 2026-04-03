@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createApp, makeAppRuntime } from "./app";
+import type { BotCoreFieldFormValues } from "./bots/bot-core-fields";
 import { BotRecord, BotId } from "./bots/bot-record";
 import { BotService } from "./bots/Services/bot-service";
 
@@ -75,6 +76,29 @@ const requestApp = (
 
     return response;
   });
+
+const requestBotForm = (
+  app: ReturnType<typeof createApp>,
+  url: string,
+  values: BotCoreFieldFormValues,
+): Effect.Effect<Response> => {
+  const body = new URLSearchParams({
+    displayName: values.displayName,
+    model: values.model,
+    name: values.name,
+    platform: values.platform,
+    talkativeness: values.talkativeness,
+  });
+
+  if (values.enabled) {
+    body.set("enabled", "on");
+  }
+
+  return requestApp(app, url, {
+    body,
+    method: "POST",
+  });
+};
 
 const createStoredBot = async function createStoredBot(
   runtime: ReturnType<typeof makeAppRuntime>,
@@ -215,35 +239,23 @@ describe("app shell", () => {
     }),
   );
 
-  it.effect("renders the bot manager list from persisted bots", () =>
-    Effect.gen(function* rendersTheBotManagerListFromPersistedBots() {
+  it.effect("creates a bot from the bot manager form", () =>
+    Effect.gen(function* createsABotFromTheBotManagerForm() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
       const app = createApp(runtime);
-
-      yield* Effect.promise(async () => {
-        await createStoredBot(
-          runtime,
-          makeTestBot({
-            displayName: "Pixel",
-            model: "openai/gpt-5-mini",
-            name: "pixel_bot",
-          }),
-        );
-        await createStoredBot(
-          runtime,
-          makeTestBot({
-            displayName: "Marble",
-            enabled: false,
-            id: BotId.makeUnsafe("bot-marble"),
-            model: "anthropic/claude-3.7-sonnet",
-            name: "marble_bot",
-            updatedAt: "2026-04-03T00:00:01.000Z",
-          }),
-        );
+      let response = yield* requestBotForm(app, "http://localhost/bots", {
+        displayName: "Pixel",
+        enabled: true,
+        model: "openai/gpt-5-mini",
+        name: "pixel_bot",
+        platform: "twitch",
+        talkativeness: "65",
       });
 
-      const response = yield* requestApp(app, "http://localhost/bots");
+      expect(response.status).toBe(seeOtherStatus);
+
+      response = yield* requestApp(app, "http://localhost/bots");
       const body = yield* Effect.promise(async () => {
         const text = await response.text();
 
@@ -252,13 +264,79 @@ describe("app shell", () => {
 
       expect(response.status).toBe(okStatus);
       expect(body).toContain("Bot Manager");
-      expect(body).toContain("Bot List");
       expect(body).toContain("Pixel");
       expect(body).toContain("@pixel_bot");
       expect(body).toContain("Model: openai/gpt-5-mini");
+      expect(body).toContain("Talkativeness: 65");
+      expect(body).toContain("Edit core fields");
+    }),
+  );
+
+  it.effect("updates a bot from the bot manager form", () =>
+    Effect.gen(function* updatesABotFromTheBotManagerForm() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+      const storedBot = makeTestBot();
+
+      yield* Effect.promise(async () => {
+        await createStoredBot(runtime, storedBot);
+      });
+
+      let response = yield* requestBotForm(app, `http://localhost/bots/${storedBot.id}`, {
+        displayName: "Marble",
+        enabled: false,
+        model: "anthropic/claude-3.7-sonnet",
+        name: "marble_bot",
+        platform: "kick",
+        talkativeness: "12",
+      });
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      response = yield* requestApp(app, "http://localhost/bots");
+      const body = yield* Effect.promise(async () => {
+        const text = await response.text();
+
+        return text;
+      });
+
+      expect(response.status).toBe(okStatus);
       expect(body).toContain("Marble");
       expect(body).toContain("@marble_bot");
+      expect(body).toContain("Platform: kick");
+      expect(body).toContain("Model: anthropic/claude-3.7-sonnet");
       expect(body).toContain("Enabled: no");
+      expect(body).toContain("Talkativeness: 12");
+    }),
+  );
+
+  it.effect("shows validation errors for invalid bot form input", () =>
+    Effect.gen(function* showsValidationErrorsForInvalidBotFormInput() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+
+      const response = yield* requestBotForm(app, "http://localhost/bots", {
+        displayName: "",
+        enabled: false,
+        model: "",
+        name: "   ",
+        platform: "youtube",
+        talkativeness: "101",
+      });
+      const body = yield* Effect.promise(async () => {
+        const text = await response.text();
+
+        return text;
+      });
+
+      expect(response.status).toBe(400);
+      expect(body).toContain("Name is required.");
+      expect(body).toContain("Display name is required.");
+      expect(body).toContain("Model is required.");
+      expect(body).toContain("Platform must be twitch or kick.");
+      expect(body).toContain("Talkativeness must be an integer between 0 and 100.");
     }),
   );
 });

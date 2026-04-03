@@ -46,7 +46,7 @@ Use it with:
 - Spec inputs: `specs/bots.md`, `specs/data.md`, `specs/ui.md`
 - Verify: bot repository tests, bot listing API test, bot list UI test, `vp check`, targeted `vp test`
 
-### [ ] VS-02: Create and edit the core bot fields
+### [x] VS-02: Create and edit the core bot fields
 
 - Depends on: `VS-01`
 - Outcome: Name, display name, platform, model, enabled, and talkativeness are editable and persist correctly.
