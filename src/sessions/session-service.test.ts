@@ -53,7 +53,7 @@ const mockBot: BotConnection = {
   username: ChatUsername.makeUnsafe("lonely-bot"),
 };
 
-const makeStoredBot = (): BotRecord =>
+const makeStoredBot = (overrides?: Partial<BotRecord>): BotRecord =>
   new BotRecord({
     createdAt: "2026-04-03T00:00:00.000Z",
     description: "a durable test bot",
@@ -78,7 +78,15 @@ const makeStoredBot = (): BotRecord =>
     temperature: 0.8,
     updatedAt: "2026-04-03T00:00:00.000Z",
     vocabularyRules: ["keep it short"],
+    ...overrides,
   });
+
+const makeBotConnection = (bot: BotRecord): BotConnection => ({
+  botId: BotId.makeUnsafe(bot.id),
+  channel: mockBot.channel,
+  platform: "mock",
+  username: ChatUsername.makeUnsafe(bot.name),
+});
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -127,12 +135,12 @@ const loadStoredSessionMessages = (
     }),
   );
 
-const insertStoredBot = (dbPath: string, bot: BotConnection): Effect.Effect<void, unknown> =>
+const insertStoredBot = (dbPath: string, bot: BotRecord): Effect.Effect<void, unknown> =>
   runWithDatabase(
     dbPath,
     Effect.gen(function* insertStoredBotRow() {
       const sql = yield* SqlClient.SqlClient;
-      const storedBot = makeStoredBot();
+      const storedBot = bot;
 
       yield* sql`INSERT INTO bots (
           id,
@@ -158,25 +166,25 @@ const insertStoredBot = (dbPath: string, bot: BotConnection): Effect.Effect<void
           updated_at
         )
         VALUES (
-          ${bot.botId},
+          ${storedBot.id},
           ${storedBot.name},
           ${storedBot.displayName},
           ${storedBot.platform},
-          ${"openrouter/mock-model"},
-          ${JSON.stringify(["openrouter/fallback-model"])},
-          ${0.8},
-          ${180},
-          ${"dry humor"},
-          ${"a durable test bot"},
-          ${JSON.stringify(["first line", "second line", "third line"])},
-          ${null},
-          ${null},
-          ${JSON.stringify(["keep it short"])},
-          ${3},
-          ${12},
-          ${65},
-          ${null},
-          ${1},
+          ${storedBot.model},
+          ${JSON.stringify(storedBot.fallbackModels)},
+          ${storedBot.temperature},
+          ${storedBot.maxTokens},
+          ${storedBot.personality},
+          ${storedBot.description},
+          ${JSON.stringify(storedBot.exampleMessages)},
+          ${storedBot.firstMessage},
+          ${storedBot.postHistoryPrompt},
+          ${JSON.stringify(storedBot.vocabularyRules)},
+          ${storedBot.responseLength.min},
+          ${storedBot.responseLength.max},
+          ${storedBot.talkativeness},
+          ${storedBot.systemPrompt},
+          ${storedBot.enabled ? 1 : 0},
           ${storedBot.createdAt},
           ${storedBot.updatedAt}
         )`;
@@ -315,7 +323,12 @@ describe("session service", () => {
   it.effect("persists incoming and outgoing messages for the active session", () =>
     Effect.gen(function* persistsIncomingAndOutgoingMessagesForTheActiveSession() {
       const dbPath = yield* createDatabasePath;
-      yield* insertStoredBot(dbPath, mockBot);
+      yield* insertStoredBot(
+        dbPath,
+        makeStoredBot({
+          talkativeness: 0,
+        }),
+      );
       const mockPlatformAdapter = yield* makeMockPlatformAdapter;
       const platformLayer = Layer.succeed(
         PlatformAdapter,
@@ -336,7 +349,7 @@ describe("session service", () => {
           text: "hello from chat",
           username: ChatUsername.makeUnsafe("viewer-1"),
         });
-        yield* mockPlatformAdapter.platformAdapter.sendMessage(mockBot.channel, "bot reply");
+        yield* mockPlatformAdapter.platformAdapter.sendMessage(mockBot, "bot reply");
         const storedMessages = yield* waitForStoredSessionMessages(dbPath, 2);
 
         expect(storedMessages).toHaveLength(2);
@@ -386,7 +399,7 @@ describe("session service", () => {
   it.effect("responds once when one enabled bot is mentioned", () =>
     Effect.gen(function* respondsOnceWhenOneEnabledBotIsMentioned() {
       const dbPath = yield* createDatabasePath;
-      yield* insertStoredBot(dbPath, mockBot);
+      yield* insertStoredBot(dbPath, makeStoredBot());
       const fakeAiClient = yield* makeFakeAiClient;
       const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
       const mockPlatformAdapter = yield* makeMockPlatformAdapter;
@@ -425,6 +438,131 @@ describe("session service", () => {
             model: "openrouter/mock-model",
           }),
         ]);
+      }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("caps multi-bot mention responses at three bots", () =>
+    Effect.gen(function* capsMultiBotMentionResponsesAtThreeBots() {
+      const dbPath = yield* createDatabasePath;
+      const pixel = makeStoredBot();
+      const echo = makeStoredBot({
+        createdAt: "2026-04-03T00:00:01.000Z",
+        displayName: "Echo",
+        id: PersistedBotId.makeUnsafe("bot-2"),
+        name: "echo",
+        talkativeness: 0,
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      });
+      const nova = makeStoredBot({
+        createdAt: "2026-04-03T00:00:02.000Z",
+        displayName: "Nova",
+        id: PersistedBotId.makeUnsafe("bot-3"),
+        name: "nova",
+        talkativeness: 0,
+        updatedAt: "2026-04-03T00:00:02.000Z",
+      });
+      const luna = makeStoredBot({
+        createdAt: "2026-04-03T00:00:03.000Z",
+        displayName: "Luna",
+        id: PersistedBotId.makeUnsafe("bot-4"),
+        name: "luna",
+        talkativeness: 0,
+        updatedAt: "2026-04-03T00:00:03.000Z",
+      });
+      const bots = [pixel, echo, nova, luna];
+
+      for (const bot of bots) {
+        yield* insertStoredBot(dbPath, bot);
+      }
+
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      yield* Effect.gen(function* exerciseResponderCap() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel @echo @nova @luna sound off",
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        });
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 4)).toHaveLength(4);
+        expect(yield* fakeAiClient.getRequests).toEqual([
+          expect.objectContaining({
+            botName: "Pixel",
+          }),
+          expect.objectContaining({
+            botName: "Echo",
+          }),
+          expect.objectContaining({
+            botName: "Nova",
+          }),
+        ]);
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
+          expect.objectContaining({
+            botId: makeBotConnection(pixel).botId,
+            username: ChatUsername.makeUnsafe("pixel"),
+          }),
+          expect.objectContaining({
+            botId: makeBotConnection(echo).botId,
+            username: ChatUsername.makeUnsafe("echo"),
+          }),
+          expect.objectContaining({
+            botId: makeBotConnection(nova).botId,
+            username: ChatUsername.makeUnsafe("nova"),
+          }),
+        ]);
+      }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("skips repeated mentions while the bot cooldown is active", () =>
+    Effect.gen(function* skipsRepeatedMentionsWhileTheBotCooldownIsActive() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, makeStoredBot());
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      yield* Effect.gen(function* exerciseBotCooldown() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel first call",
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        });
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel second call",
+          username: ChatUsername.makeUnsafe("viewer-2"),
+        });
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 3)).toHaveLength(3);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(1);
+        expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(1);
+        expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(3);
       }).pipe(Effect.provide(appLayer));
     }),
   );

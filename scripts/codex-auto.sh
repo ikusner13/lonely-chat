@@ -9,6 +9,7 @@ REASONING="${CODEX_REASONING:-high}"
 SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
 AGENT_TIMEOUT_SECONDS="${CODEX_AGENT_TIMEOUT_SECONDS:-900}"
 MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-6}"
+HEARTBEAT_SECONDS="${CODEX_HEARTBEAT_SECONDS:-15}"
 MAX_ITERATIONS=0
 RUN_PACK=false
 NO_COMMIT=false
@@ -62,6 +63,14 @@ while [[ $# -gt 0 ]]; do
       MAX_ATTEMPTS_PER_SLICE="$2"
       shift 2
       ;;
+    --status)
+      if [[ -f ".codex-auto/status.json" ]]; then
+        cat ".codex-auto/status.json"
+      else
+        echo '{"phase":"idle","note":"No active codex-auto status file found."}'
+      fi
+      exit 0
+      ;;
     --help|-h)
       cat <<'EOF'
 Usage: scripts/codex-auto.sh [options]
@@ -79,6 +88,7 @@ Options:
   --agent-timeout-seconds Stop a single Codex run after n seconds (default: 900)
   --max-attempts-per-slice
                          Stop after n unfinished attempts on the same slice (default: 6)
+  --status                Print the current `.codex-auto/status.json` and exit
   --help                  Show this message
 EOF
       exit 0
@@ -97,10 +107,45 @@ RESULT_FILE="$OUT_DIR/result.json"
 PROGRESS_FILE="$OUT_DIR/progress.md"
 CI_ERRORS_FILE="$OUT_DIR/ci-errors.md"
 AGENT_TIMEOUT_FILE="$OUT_DIR/agent-timeout.md"
+STATUS_FILE="$OUT_DIR/status.json"
+EVENT_LOG_FILE="$OUT_DIR/events.log"
 mkdir -p "$OUT_DIR"
 
 log() {
+  local timestamp
+  timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   echo "[codex-auto] $*"
+  echo "$timestamp $*" >> "$EVENT_LOG_FILE"
+}
+
+write_status() {
+  local phase="$1"
+  local iteration="$2"
+  local slice="$3"
+  local attempt="$4"
+  local note="$5"
+  local pid="${6:-}"
+  local log_file="${7:-}"
+
+  jq -n \
+    --arg phase "$phase" \
+    --arg iteration "$iteration" \
+    --arg slice "$slice" \
+    --arg attempt "$attempt" \
+    --arg note "$note" \
+    --arg pid "$pid" \
+    --arg log_file "$log_file" \
+    --arg updated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    '{
+      phase: $phase,
+      iteration: $iteration,
+      slice: $slice,
+      attempt: $attempt,
+      note: $note,
+      pid: ($pid | if . == "" then null else . end),
+      log_file: ($log_file | if . == "" then null else . end),
+      updated_at: $updated_at
+    }' > "$STATUS_FILE"
 }
 
 require_command() {
@@ -200,11 +245,14 @@ EOF
 
   cat >> "$PROMPT_FILE" <<'EOF'
 
-Make one implementation attempt and at most one verification pass inside this Codex invocation.
+Stay on this same slice inside this Codex invocation and try to self-repair when your slice-specific targeted verification fails.
 Run only the slice-specific targeted verification you need for this slice.
 Do not run `vp check`; the outer loop runs it after you exit.
-If a targeted check fails, stop and return JSON with `"status": "continue"` and summarize the failing command(s).
-Do not enter an internal repair loop inside this Codex invocation.
+If a targeted check fails, inspect the failure, edit the code, and re-run the targeted verification until it passes or you are genuinely blocked.
+Return `"status": "slice_complete"` only when the slice-specific targeted verification passes and the task checkbox is updated.
+Return `"status": "blocked"` only when you cannot safely continue without human input.
+Return `"status": "continue"` only if you made a serious repair attempt but are handing control back because you are at risk of getting stuck or the remaining work is not safe to continue autonomously.
+Do not stop after the first failed targeted verification.
 
 Return only JSON matching the supplied schema.
 Set "status" to "slice_complete" only if one slice is fully verified and its checkbox is updated.
@@ -219,6 +267,7 @@ run_agent() {
 
   rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE" "$agent_log_file"
   log "starting Codex iteration $iteration; raw log: $agent_log_file"
+  write_status "running_codex" "$iteration" "" "" "Starting Codex agent run." "" "$agent_log_file"
 
   codex exec \
     --dangerously-bypass-approvals-and-sandbox \
@@ -230,6 +279,7 @@ run_agent() {
     --output-last-message "$RESULT_FILE" \
     - < "$PROMPT_FILE" >"$agent_log_file" 2>&1 &
   local agent_pid="$!"
+  write_status "running_codex" "$iteration" "" "" "Codex agent is running." "$agent_pid" "$agent_log_file"
 
   (
     sleep "$AGENT_TIMEOUT_SECONDS"
@@ -248,6 +298,37 @@ EOF
     fi
   ) &
   local watchdog_pid="$!"
+  (
+    local previous_size=0
+
+    while kill -0 "$agent_pid" >/dev/null 2>&1; do
+      sleep "$HEARTBEAT_SECONDS"
+
+      if ! kill -0 "$agent_pid" >/dev/null 2>&1; then
+        break
+      fi
+
+      local current_size=0
+      local delta=0
+
+      if [[ -f "$agent_log_file" ]]; then
+        current_size="$(wc -c < "$agent_log_file" | tr -d ' ')"
+      fi
+
+      delta=$((current_size - previous_size))
+      previous_size="$current_size"
+      log "Codex iteration $iteration still running; pid=$agent_pid log_bytes=$current_size delta_bytes=$delta raw_log=$agent_log_file"
+      write_status \
+        "running_codex" \
+        "$iteration" \
+        "" \
+        "" \
+        "Codex is still running; log_bytes=$current_size delta_bytes=$delta." \
+        "$agent_pid" \
+        "$agent_log_file"
+    done
+  ) &
+  local heartbeat_pid="$!"
   local agent_status=0
 
   if ! wait "$agent_pid"; then
@@ -256,18 +337,23 @@ EOF
 
   kill "$watchdog_pid" >/dev/null 2>&1 || true
   wait "$watchdog_pid" >/dev/null 2>&1 || true
+  kill "$heartbeat_pid" >/dev/null 2>&1 || true
+  wait "$heartbeat_pid" >/dev/null 2>&1 || true
 
   if [[ -f "$AGENT_TIMEOUT_FILE" ]]; then
     echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE and $agent_log_file" >&2
+    write_status "timed_out" "$iteration" "" "" "Codex timed out." "$agent_pid" "$agent_log_file"
     return 124
   fi
 
   if [[ ! -f "$RESULT_FILE" ]]; then
     echo "codex exec exited without writing $RESULT_FILE; see $agent_log_file" >&2
+    write_status "agent_failed" "$iteration" "" "" "Codex exited without a structured result." "$agent_pid" "$agent_log_file"
     return 1
   fi
 
   log "finished Codex iteration $iteration"
+  write_status "agent_finished" "$iteration" "" "" "Codex returned a structured result." "" "$agent_log_file"
   return "$agent_status"
 }
 
@@ -297,21 +383,30 @@ run_checks() {
   local test_log="$OUT_DIR/vp-test.$iteration.log"
   local pack_log="$OUT_DIR/vp-pack.$iteration.log"
 
-  if ! vp check | tee "$check_log"; then
+  log "running vp check; log: $check_log"
+  if ! vp check >"$check_log" 2>&1; then
     capture_failure "vp check" "$check_log"
+    tail -n 120 "$check_log"
     return 1
   fi
+  log "vp check passed"
 
-  if ! vp run test | tee "$test_log"; then
+  log "running vp run test; log: $test_log"
+  if ! vp run test >"$test_log" 2>&1; then
     capture_failure "vp run test" "$test_log"
+    tail -n 120 "$test_log"
     return 1
   fi
+  log "vp run test passed"
 
   if [[ "$RUN_PACK" == true ]]; then
-    if ! vp pack | tee "$pack_log"; then
+    log "running vp pack; log: $pack_log"
+    if ! vp pack >"$pack_log" 2>&1; then
       capture_failure "vp pack" "$pack_log"
+      tail -n 120 "$pack_log"
       return 1
     fi
+    log "vp pack passed"
   fi
 
   rm -f "$CI_ERRORS_FILE"
@@ -342,11 +437,13 @@ build_schema
 completed_slices=0
 last_selected_slice=""
 attempts_for_slice=0
+write_status "idle" "0" "" "" "codex-auto initialized." "" ""
 
 iteration=1
 while :; do
   if [[ -z "$TASK_OVERRIDE" && "$MAX_ITERATIONS" -gt 0 && "$completed_slices" -ge "$MAX_ITERATIONS" ]]; then
     echo "completed $completed_slices slice(s); reached max iterations: $MAX_ITERATIONS"
+    write_status "completed" "$iteration" "" "" "Reached the requested completed-slice limit." "" ""
     exit 0
   fi
 
@@ -370,11 +467,35 @@ while :; do
     last_selected_slice="$slice"
     attempts_for_slice=1
   fi
+  write_status \
+    "verifying" \
+    "$iteration" \
+    "$slice" \
+    "$attempts_for_slice" \
+    "Running outer verification for the selected slice." \
+    "" \
+    ""
 
   if ! run_checks "$iteration"; then
     log "verification failed for $slice; see $CI_ERRORS_FILE"
+    write_status \
+      "verification_failed" \
+      "$iteration" \
+      "$slice" \
+      "$attempts_for_slice" \
+      "Outer verification failed; see ci-errors and per-command logs." \
+      "" \
+      ""
     if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
       echo "slice $slice failed verification $attempts_for_slice time(s); stopping" >&2
+      write_status \
+        "stopped" \
+        "$iteration" \
+        "$slice" \
+        "$attempts_for_slice" \
+        "Stopped after reaching the per-slice verification failure limit." \
+        "" \
+        ""
       exit 3
     fi
 
@@ -391,21 +512,39 @@ while :; do
 
     if [[ -n "$TASK_OVERRIDE" ]]; then
       log "completed $slice"
+      write_status "completed" "$iteration" "$slice" "$attempts_for_slice" "Completed the requested slice." "" ""
       exit 0
     fi
 
     log "completed $slice ($completed_slices slice(s) done)"
+    write_status \
+      "completed" \
+      "$iteration" \
+      "$slice" \
+      "$attempts_for_slice" \
+      "Completed slice $completed_slices of ${MAX_ITERATIONS:-0} requested." \
+      "" \
+      ""
     iteration=$((iteration + 1))
     continue
   fi
 
   if [[ "$status" == "blocked" ]]; then
     echo "blocked: $(jq -r '.summary' "$RESULT_FILE")" >&2
+    write_status "blocked" "$iteration" "$slice" "$attempts_for_slice" "Codex reported a blocker." "" ""
     exit 2
   fi
 
   if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
     echo "slice $slice returned continue $attempts_for_slice time(s); stopping" >&2
+    write_status \
+      "stopped" \
+      "$iteration" \
+      "$slice" \
+      "$attempts_for_slice" \
+      "Stopped after reaching the per-slice continue limit." \
+      "" \
+      ""
     exit 3
   fi
 

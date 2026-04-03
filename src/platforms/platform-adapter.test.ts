@@ -49,7 +49,7 @@ describe("mock platform adapter", () => {
       const mockPlatformAdapter = yield* makeMockPlatformAdapter;
 
       yield* mockPlatformAdapter.platformAdapter.connect(mockBot);
-      yield* mockPlatformAdapter.platformAdapter.sendMessage(mockBot.channel, "bot reply");
+      yield* mockPlatformAdapter.platformAdapter.sendMessage(mockBot, "bot reply");
 
       expect(yield* mockPlatformAdapter.getConnectedBots).toEqual([mockBot]);
       expect(yield* mockPlatformAdapter.getSentMessages).toEqual([

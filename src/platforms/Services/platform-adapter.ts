@@ -50,7 +50,7 @@ export interface PlatformAdapterShape {
   readonly connect: (bot: BotConnection) => Effect.Effect<void, PlatformConnectionError>;
   readonly disconnect: (bot: BotConnection) => Effect.Effect<void>;
   readonly sendMessage: (
-    channel: ChannelName,
+    bot: BotConnection,
     text: string,
   ) => Effect.Effect<void, PlatformSendError>;
   readonly listenChat: (channel: ChannelName) => Stream.Stream<ChatMessage>;

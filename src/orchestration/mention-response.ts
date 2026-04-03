@@ -1,7 +1,40 @@
-import type { BotRecord } from "../bots/bot-record";
+import { Schema } from "effect";
+
 import { AiModelName, BotName } from "../ai/Services/ai-client";
 import type { AiGenerateRequest, AiPromptMessage } from "../ai/Services/ai-client";
+import { BotRecord } from "../bots/bot-record";
+import { BotId } from "../platforms/Services/platform-adapter";
 import type { ChatMessage, PlatformName } from "../platforms/Services/platform-adapter";
+import type { SessionMessageRecord } from "../sessions/session-message-record";
+
+const responderCap = 3;
+const consecutiveMessageLimit = 3;
+const threadContinuationThreshold = 0.4;
+const baseCooldownMs = 5000;
+const consecutiveCooldownMs = 2000;
+
+export const SpeakerSelectionReason = Schema.Literals(["mention", "thread", "talkativeness"]);
+export type SpeakerSelectionReason = typeof SpeakerSelectionReason.Type;
+
+export class BotSpeakerState extends Schema.Class("BotSpeakerState")({
+  botId: BotId,
+  consecutiveCount: Schema.Number,
+  cooldownUntil: Schema.Number,
+  lastSpokeAt: Schema.NullOr(Schema.Number),
+}) {}
+
+export class SelectedSpeaker extends Schema.Class("SelectedSpeaker")({
+  bot: Schema.instanceOf(BotRecord),
+  reason: SpeakerSelectionReason,
+}) {}
+
+interface SpeakerSelectionOptions {
+  readonly botStates?: readonly BotSpeakerState[];
+  readonly now?: number;
+  readonly recentMessages?: readonly SessionMessageRecord[];
+  readonly talkativenessRoll?: (bot: BotRecord) => number;
+  readonly threadRoll?: (bot: BotRecord) => number;
+}
 
 const escapeRegExp = (value: string): string => value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
@@ -51,17 +84,160 @@ export const findMentionedBots = (
 ): readonly BotRecord[] =>
   bots.filter((bot) => bot.enabled && makeMentionPattern(bot.name).test(messageText));
 
-export const selectSingleMentionedBot = (
-  messageText: string,
-  bots: readonly BotRecord[],
-): BotRecord | null => {
-  const mentionedBots = findMentionedBots(messageText, bots);
+const makeStateMap = (
+  botStates: readonly BotSpeakerState[],
+): ReadonlyMap<BotSpeakerState["botId"], BotSpeakerState> =>
+  new Map(botStates.map((botState) => [botState.botId, botState]));
 
-  if (mentionedBots.length !== 1) {
-    return null;
+const hasBotSpokenRecently = (
+  bot: BotRecord,
+  recentMessages: readonly SessionMessageRecord[],
+): boolean =>
+  recentMessages
+    .toReversed()
+    .slice(0, responderCap)
+    .some((message) => message.isBot && message.botId === BotId.makeUnsafe(bot.id));
+
+const selectionPriority = (reason: SpeakerSelectionReason): number => {
+  switch (reason) {
+    case "mention": {
+      return 0;
+    }
+    case "thread": {
+      return 1;
+    }
+    case "talkativeness": {
+      return 2;
+    }
+    default: {
+      return responderCap;
+    }
+  }
+};
+
+const isEligibleByState = (
+  bot: BotRecord,
+  stateMap: ReadonlyMap<BotSpeakerState["botId"], BotSpeakerState>,
+  now: number,
+): boolean => {
+  const botState = stateMap.get(BotId.makeUnsafe(bot.id));
+
+  if (botState === undefined) {
+    return true;
   }
 
-  return mentionedBots[0] ?? null;
+  return botState.consecutiveCount < consecutiveMessageLimit && botState.cooldownUntil <= now;
+};
+
+export const selectSpeakers = (
+  messageText: string,
+  bots: readonly BotRecord[],
+  options: SpeakerSelectionOptions = {},
+): readonly SelectedSpeaker[] => {
+  const enabledBots = bots.filter((bot) => bot.enabled);
+  const stateMap = makeStateMap(options.botStates ?? []);
+  const now = options.now ?? Date.now();
+  const recentMessages = options.recentMessages ?? [];
+  const talkativenessRoll = options.talkativenessRoll ?? (() => Math.random());
+  const threadRoll = options.threadRoll ?? (() => Math.random());
+  const mentionedBots = findMentionedBots(messageText, enabledBots);
+  const eligibleMentionedSpeakers = mentionedBots
+    .map(
+      (bot) =>
+        new SelectedSpeaker({
+          bot,
+          reason: "mention",
+        }),
+    )
+    .filter((speaker) => isEligibleByState(speaker.bot, stateMap, now));
+
+  if (eligibleMentionedSpeakers.length > 0) {
+    return eligibleMentionedSpeakers.slice(0, responderCap);
+  }
+
+  const nonMentionedBots = enabledBots.filter(
+    (bot) => !mentionedBots.some((mentionedBot) => mentionedBot.id === bot.id),
+  );
+  const threadedBots = nonMentionedBots.filter(
+    (bot) =>
+      hasBotSpokenRecently(bot, recentMessages) && threadRoll(bot) < threadContinuationThreshold,
+  );
+  const talkativeBots = nonMentionedBots.filter(
+    (bot) =>
+      !threadedBots.some((threadedBot) => threadedBot.id === bot.id) &&
+      talkativenessRoll(bot) < bot.talkativeness / 100,
+  );
+
+  const mergedSpeakers: SelectedSpeaker[] = [];
+
+  for (const bot of threadedBots) {
+    if (mergedSpeakers.some((speaker) => speaker.bot.id === bot.id)) {
+      continue;
+    }
+
+    mergedSpeakers.push(
+      new SelectedSpeaker({
+        bot,
+        reason: "thread",
+      }),
+    );
+  }
+
+  for (const bot of talkativeBots) {
+    if (mergedSpeakers.some((speaker) => speaker.bot.id === bot.id)) {
+      continue;
+    }
+
+    mergedSpeakers.push(
+      new SelectedSpeaker({
+        bot,
+        reason: "talkativeness",
+      }),
+    );
+  }
+
+  return mergedSpeakers
+    .filter((speaker) => isEligibleByState(speaker.bot, stateMap, now))
+    .map((speaker, index) => ({
+      index,
+      speaker,
+    }))
+    .toSorted(
+      (left, right) =>
+        selectionPriority(left.speaker.reason) - selectionPriority(right.speaker.reason) ||
+        left.index - right.index,
+    )
+    .slice(0, responderCap)
+    .map(({ speaker }) => speaker);
+};
+
+export const advanceSpeakerState = (
+  botStates: readonly BotSpeakerState[],
+  botId: BotSpeakerState["botId"],
+  now: number,
+): readonly BotSpeakerState[] => {
+  const currentState = botStates.find((botState) => botState.botId === botId) ?? null;
+  const nextConsecutiveCount = (currentState?.consecutiveCount ?? 0) + 1;
+  const nextBotState = new BotSpeakerState({
+    botId,
+    consecutiveCount: nextConsecutiveCount,
+    cooldownUntil: now + baseCooldownMs + consecutiveCooldownMs * nextConsecutiveCount,
+    lastSpokeAt: now,
+  });
+
+  const otherBotStates = botStates
+    .filter((botState) => botState.botId !== botId)
+    .map(
+      (botState) =>
+        new BotSpeakerState({
+          botId: botState.botId,
+          consecutiveCount: 0,
+          cooldownUntil: botState.cooldownUntil,
+          lastSpokeAt: botState.lastSpokeAt,
+        }),
+    );
+
+  return [...otherBotStates, nextBotState];
 };
 
 export const makeMentionResponseRequest = (

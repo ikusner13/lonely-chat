@@ -90,7 +90,7 @@ Use it with:
 - Spec inputs: `specs/orchestration.md`, `specs/technical-orchestrator.md`, `specs/technical-ai.md`
 - Verify: mention detection tests, generate-and-send integration test, `vp check`, targeted `vp test`
 
-### [ ] VS-08: Multi-bot speaker selection, caps, and cooldowns
+### [x] VS-08: Multi-bot speaker selection, caps, and cooldowns
 
 - Depends on: `VS-07`
 - Outcome: Selection rules, responder cap, consecutive-message limits, and cooldowns behave as specified.

@@ -13,9 +13,11 @@ import type { AiGenerationError } from "../../ai/ai-generation-error";
 import { AiClient } from "../../ai/Services/ai-client";
 import { BotService } from "../../bots/Services/bot-service";
 import {
+  advanceSpeakerState,
   makeMentionResponseRequest,
-  selectSingleMentionedBot,
+  selectSpeakers,
 } from "../../orchestration/mention-response";
+import type { BotSpeakerState } from "../../orchestration/mention-response";
 import {
   BotId as PlatformBotId,
   ChannelName,
@@ -150,6 +152,7 @@ export const SessionServiceLive = Layer.effect(
         ),
       );
       const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
+      const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
 
       const persistMessage = Effect.fn("SessionService.persistMessage")(
         function* persistMessageEffect(sessionId: SessionId, message: ChatMessage) {
@@ -187,30 +190,68 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
-      const maybeRespondToMention = Effect.fn("SessionService.maybeRespondToMention")(
-        function* maybeRespondToMentionEffect(session: SessionRecord, message: ChatMessage) {
+      const getSessionMessages = Effect.fn("SessionService.getSessionMessages")(
+        function* getSessionMessagesEffect(sessionId: SessionId) {
+          const rows = yield* sql<SessionMessageRow>`SELECT
+              id,
+              session_id,
+              bot_id,
+              username,
+              content,
+              platform,
+              is_bot,
+              tokens_used,
+              model_used,
+              sent_at
+            FROM session_messages
+            WHERE session_id = ${sessionId}
+            ORDER BY sent_at ASC, rowid ASC`;
+
+          return rows.map(makeStoredSessionMessageRecord);
+        },
+      );
+
+      const maybeRespondToMessage = Effect.fn("SessionService.maybeRespondToMessage")(
+        function* maybeRespondToMessageEffect(session: SessionRecord, message: ChatMessage) {
           if (message.direction !== "incoming") {
             return;
           }
 
-          const mentionedBot = selectSingleMentionedBot(message.text, yield* botService.listBots());
+          const speakerStates = yield* Ref.get(speakerStatesRef);
+          const selectedSpeakers = selectSpeakers(message.text, yield* botService.listBots(), {
+            botStates: speakerStates,
+            now: Date.now(),
+            recentMessages: yield* getSessionMessages(session.id),
+          });
 
-          if (mentionedBot === null) {
+          if (selectedSpeakers.length === 0) {
             return;
           }
 
-          yield* platformAdapter.connect({
-            botId: PlatformBotId.makeUnsafe(mentionedBot.id),
-            channel: session.channel,
-            platform: session.platform,
-            username: ChatUsername.makeUnsafe(mentionedBot.name),
-          });
+          for (const selectedSpeaker of selectedSpeakers) {
+            const speakerConnection = {
+              botId: PlatformBotId.makeUnsafe(selectedSpeaker.bot.id),
+              channel: session.channel,
+              platform: session.platform,
+              username: ChatUsername.makeUnsafe(selectedSpeaker.bot.name),
+            } as const;
 
-          const response = yield* aiClient.generateText(
-            makeMentionResponseRequest(mentionedBot, message),
-          );
+            yield* platformAdapter.connect(speakerConnection);
 
-          yield* platformAdapter.sendMessage(session.channel, response.text);
+            const response = yield* aiClient.generateText(
+              makeMentionResponseRequest(selectedSpeaker.bot, message),
+            );
+
+            yield* platformAdapter.sendMessage(speakerConnection, response.text);
+            yield* Ref.set(
+              speakerStatesRef,
+              advanceSpeakerState(
+                yield* Ref.get(speakerStatesRef),
+                speakerConnection.botId,
+                Date.now(),
+              ),
+            );
+          }
         },
       );
 
@@ -226,7 +267,7 @@ export const SessionServiceLive = Layer.effect(
             Stream.runForEach((message) =>
               Effect.gen(function* handleSessionMessageEffect() {
                 yield* persistMessage(session.id, message);
-                yield* maybeRespondToMention(session, message);
+                yield* maybeRespondToMessage(session, message);
               }),
             ),
             Effect.forkIn(serviceScope),
@@ -253,27 +294,6 @@ export const SessionServiceLive = Layer.effect(
       const getActiveSession = Effect.fn("SessionService.getActiveSession")(
         function* getActiveSessionEffect() {
           return yield* Ref.get(activeSessionRef);
-        },
-      );
-
-      const getSessionMessages = Effect.fn("SessionService.getSessionMessages")(
-        function* getSessionMessagesEffect(sessionId: SessionId) {
-          const rows = yield* sql<SessionMessageRow>`SELECT
-              id,
-              session_id,
-              bot_id,
-              username,
-              content,
-              platform,
-              is_bot,
-              tokens_used,
-              model_used,
-              sent_at
-            FROM session_messages
-            WHERE session_id = ${sessionId}
-            ORDER BY sent_at ASC, rowid ASC`;
-
-          return rows.map(makeStoredSessionMessageRecord);
         },
       );
 
@@ -344,6 +364,7 @@ export const SessionServiceLive = Layer.effect(
               ${null}
             )`;
         yield* Ref.set(activeSessionRef, session);
+        yield* Ref.set(speakerStatesRef, []);
         yield* startMessageListener(session);
 
         return session;
@@ -373,6 +394,7 @@ export const SessionServiceLive = Layer.effect(
           WHERE id = ${endedSession.id}`;
         yield* stopMessageListener();
         yield* Ref.set(activeSessionRef, null);
+        yield* Ref.set(speakerStatesRef, []);
 
         return endedSession;
       });

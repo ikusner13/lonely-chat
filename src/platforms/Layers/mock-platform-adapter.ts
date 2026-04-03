@@ -91,21 +91,24 @@ export const makeMockPlatformAdapter = Effect.gen(function* makeMockPlatformAdap
   });
 
   const sendMessage = Effect.fn("PlatformAdapter.sendMessage")(function* sendMockMessage(
-    channel: ChannelName,
+    bot: BotConnection,
     text: string,
   ) {
     const connections = yield* Ref.get(connectionsRef);
     const connectedBot = connections.find(
-      (connection) => connection.channel === channel && connection.platform === mockPlatform,
+      (connection) =>
+        connection.botId === bot.botId &&
+        connection.channel === bot.channel &&
+        connection.platform === bot.platform,
     );
 
     if (connectedBot === undefined) {
-      return yield* Effect.fail(makePlatformSendError(channel));
+      return yield* Effect.fail(makePlatformSendError(bot.channel));
     }
 
     const message: ChatMessage = {
       botId: connectedBot.botId,
-      channel,
+      channel: bot.channel,
       direction: "outgoing",
       platform: mockPlatform,
       text,
