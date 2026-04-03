@@ -511,6 +511,68 @@ describe("app shell", () => {
     }),
   );
 
+  it.effect("renders export links and downloads session history as csv and json", () =>
+    Effect.gen(function* rendersExportLinksAndDownloadsSessionHistoryAsCsvAndJson() {
+      const dbPath = yield* createDatabasePath;
+      const { mockPlatformAdapter, runtime } = yield* createTestRuntimeWithMockPlatform(dbPath);
+      const app = createApp(runtime);
+
+      const session = yield* fromPromise(
+        runtime.runPromise(SessionService.use((sessionService) => sessionService.startSession())),
+      );
+      yield* Effect.yieldNow;
+      yield* mockPlatformAdapter.emitIncomingMessage({
+        channel: ChannelName.makeUnsafe("lonely-chat"),
+        text: "export this chat",
+        username: ChatUsername.makeUnsafe("viewer-export"),
+      });
+      yield* waitForChatViewerMessage(app, "export this chat");
+      yield* fromPromise(
+        runtime.runPromise(SessionService.use((sessionService) => sessionService.stopSession())),
+      );
+
+      let response = yield* requestApp(app, "http://localhost/chat");
+      let body = yield* fromPromise(response.text());
+
+      expect(response.status).toBe(okStatus);
+      expect(body).toContain(`/chat/export/${session.id}/csv`);
+      expect(body).toContain(`/chat/export/${session.id}/json`);
+      expect(body).toContain("Export CSV");
+      expect(body).toContain("Export JSON");
+
+      response = yield* requestApp(app, `http://localhost/chat/export/${session.id}/csv`);
+      body = yield* fromPromise(response.text());
+
+      expect(response.status).toBe(okStatus);
+      expect(response.headers.get("content-disposition")).toBe(
+        `attachment; filename="session-${session.id}.csv"`,
+      );
+      expect(response.headers.get("content-type")).toContain("text/csv");
+      expect(body).toContain("timestamp,username,content,is_bot,model_used,tokens_used");
+      expect(body).toContain('"viewer-export"');
+      expect(body).toContain('"export this chat"');
+
+      response = yield* requestApp(app, `http://localhost/chat/export/${session.id}/json`);
+
+      expect(response.status).toBe(okStatus);
+      expect(response.headers.get("content-disposition")).toBe(
+        `attachment; filename="session-${session.id}.json"`,
+      );
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(yield* fromPromise(response.json())).toEqual([
+        expect.objectContaining({
+          botId: null,
+          content: "export this chat",
+          isBot: false,
+          platform: "mock",
+          sessionId: session.id,
+          tokensUsed: null,
+          username: "viewer-export",
+        }),
+      ]);
+    }),
+  );
+
   it.effect("lists persisted bots through the bot listing api", () =>
     Effect.gen(function* listsPersistedBotsThroughTheBotListingApi() {
       const dbPath = yield* createDatabasePath;

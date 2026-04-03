@@ -2,6 +2,8 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -38,8 +40,11 @@ import { ScenarioServiceLive } from "./scenarios/Layers/scenario-service";
 import { ScenarioId } from "./scenarios/scenario-record";
 import { ScenarioService } from "./scenarios/Services/scenario-service";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
-import { SessionService } from "./sessions/Services/session-service";
-import type { SessionAlert } from "./sessions/Services/session-service";
+import {
+  SessionExportFormat,
+  SessionId,
+  SessionService,
+} from "./sessions/Services/session-service";
 import type { SessionMessageRecord } from "./sessions/session-message-record";
 import type { SessionRecord } from "./sessions/session-record";
 import type { ScenarioEditorFormErrors } from "./scenarios/scenario-editor-fields";
@@ -48,6 +53,7 @@ import type { ScenarioRecord } from "./scenarios/scenario-record";
 const badRequestStatus = 400;
 const redirectSeeOtherStatus = 303;
 type AppServices = AiClient | BotService | ScenarioService | SessionService;
+type SessionExportFormatType = typeof SessionExportFormat.Type;
 
 interface BotFormState {
   readonly errors: BotEditorFormErrors;
@@ -72,10 +78,20 @@ interface ChatViewerState {
 }
 
 interface DashboardState {
-  readonly activeAlerts: readonly SessionAlert[];
+  readonly activeAlerts: readonly DashboardAlertState[];
   readonly activeSession: SessionRecord | null;
   readonly mostRecentSession: SessionRecord | null;
 }
+
+interface DashboardAlertState {
+  readonly currentValue: number;
+  readonly limitValue: number;
+  readonly metric: "cost" | "time";
+  readonly sessionId: string;
+  readonly thresholdPercent: number;
+}
+
+const decodeSessionExportFormat = Schema.decodeUnknownResult(SessionExportFormat);
 
 const escapeHtml = (value: string): string =>
   value
@@ -98,7 +114,7 @@ const formatActiveDuration = (startedAt: string): string => {
 
 const formatCostUsd = (value: number): string => `$${value.toFixed(4)}`;
 
-const renderAlertBanner = (alerts: readonly SessionAlert[]): string => {
+const renderAlertBanner = (alerts: readonly DashboardAlertState[]): string => {
   if (alerts.length === 0) {
     return "";
   }
@@ -805,6 +821,9 @@ const serializeSessionMessage = (message: SessionMessageRecord) => ({
   username: message.username,
 });
 
+const makeSessionExportFileName = (sessionId: SessionId, format: SessionExportFormatType) =>
+  `session-${sessionId}.${format}`;
+
 const renderChatMessageListItem = (
   message: SessionMessageRecord,
 ): string => `<li data-session-message-id="${message.id}">
@@ -828,6 +847,14 @@ const renderChatViewerDocument = (state: ChatViewerState): string => {
       : `<p>Status: ${escapeHtml(state.selectedSession.status)}</p>
         <p>Platform: ${escapeHtml(state.selectedSession.platform)}</p>
         <p>Channel: ${escapeHtml(state.selectedSession.channel)}</p>`;
+  const exportMarkup =
+    state.selectedSession === null
+      ? ""
+      : `<section>
+        <h2>Export</h2>
+        <a href="/chat/export/${escapeHtml(state.selectedSession.id)}/csv">Export CSV</a>
+        <a href="/chat/export/${escapeHtml(state.selectedSession.id)}/json">Export JSON</a>
+      </section>`;
   const messagesMarkup =
     state.messages.length === 0
       ? '<li id="chat-empty">No messages captured for this session yet.</li>'
@@ -862,6 +889,7 @@ const renderChatViewerDocument = (state: ChatViewerState): string => {
           ${messagesMarkup}
         </ul>
       </section>
+      ${exportMarkup}
     </main>
     <script>
       const chatState = ${initialState};
@@ -955,6 +983,38 @@ export const createApp = (
     const chatViewerState = await runtime.runPromise(loadChatViewerState());
 
     return context.html(renderChatViewerDocument(chatViewerState));
+  });
+
+  app.get("/chat/export/:sessionId/:format", async (context) => {
+    const decodedFormat = decodeSessionExportFormat(context.req.param("format"));
+
+    if (!Result.isSuccess(decodedFormat)) {
+      return context.notFound();
+    }
+
+    const sessionId = SessionId.makeUnsafe(context.req.param("sessionId"));
+    const exportedSession = await runtime.runPromise(
+      SessionService.use((sessionService) =>
+        sessionService.exportSession(sessionId, decodedFormat.success),
+      ),
+    );
+
+    if (exportedSession === null) {
+      return context.notFound();
+    }
+
+    context.header(
+      "Content-Disposition",
+      `attachment; filename="${makeSessionExportFileName(sessionId, decodedFormat.success)}"`,
+    );
+    context.header(
+      "Content-Type",
+      decodedFormat.success === "csv"
+        ? "text/csv; charset=utf-8"
+        : "application/json; charset=utf-8",
+    );
+
+    return context.body(exportedSession);
   });
 
   app.get("/api/chat/stream", async (context) => {

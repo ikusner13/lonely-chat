@@ -10,6 +10,9 @@ import type { SessionStartError } from "../session-start-error";
 export const SessionId = Schema.String.pipe(Schema.brand("SessionId"));
 export type SessionId = typeof SessionId.Type;
 
+export const SessionExportFormat = Schema.Literals(["csv", "json"]);
+export type SessionExportFormat = typeof SessionExportFormat.Type;
+
 export const SessionStatus = Schema.Literals(["active", "ended", "timeout", "cost_limit"]);
 export type SessionStatus = typeof SessionStatus.Type;
 
@@ -40,6 +43,10 @@ export class SessionAlert extends Schema.Class<SessionAlert>("lonely-chat/sessio
 }) {}
 
 export interface SessionServiceShape {
+  readonly exportSession: (
+    sessionId: SessionId,
+    format: SessionExportFormat,
+  ) => Effect.Effect<string | null, SqlError>;
   readonly getActiveAlerts: () => Effect.Effect<readonly SessionAlert[]>;
   readonly getActiveSession: () => Effect.Effect<SessionRecord | null, SqlError>;
   readonly getSessionMessages: (

@@ -127,7 +127,7 @@ Use it with:
 - Spec inputs: `specs/data.md`, `specs/ui.md`, `specs/technical-effect.md`, `specs/technical-ai.md`
 - Verify: threshold tests, timeout/cost-limit tests, alert UI test, `vp check`, targeted `vp test`
 
-### [ ] VS-13: Export session history as CSV and JSON
+### [x] VS-13: Export session history as CSV and JSON
 
 - Depends on: `VS-05`
 - Outcome: A completed session can be exported from the UI in both formats and matches stored data.

@@ -64,6 +64,8 @@ interface StoredSessionLimitRow {
   readonly total_tokens_used: number;
 }
 
+const escapeCsvValue = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+
 const mockBot: BotConnection = {
   botId: BotId.makeUnsafe("bot-1"),
   channel: ChannelName.makeUnsafe("lonely-chat"),
@@ -473,6 +475,67 @@ describe("session service", () => {
           status: "ended",
         },
       ]);
+    }),
+  );
+
+  it.effect("exports completed session history as csv and json", () =>
+    Effect.gen(function* exportsCompletedSessionHistoryAsCsvAndJson() {
+      const dbPath = yield* createDatabasePath;
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      const exportedSession = yield* Effect.gen(function* exerciseSessionExport() {
+        const sessionService = yield* SessionService;
+
+        const startedSession = yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "archive this line",
+          username: ChatUsername.makeUnsafe("viewer-export"),
+        });
+        yield* waitForStoredSessionMessages(dbPath, 1);
+        yield* sessionService.stopSession();
+
+        return {
+          csv: yield* sessionService.exportSession(startedSession.id, "csv"),
+          json: yield* sessionService.exportSession(startedSession.id, "json"),
+          messages: yield* sessionService.getSessionMessages(startedSession.id),
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(exportedSession.csv).toBe(
+        [
+          "timestamp,username,content,is_bot,model_used,tokens_used",
+          [
+            escapeCsvValue(exportedSession.messages[0]?.sentAt ?? ""),
+            escapeCsvValue(exportedSession.messages[0]?.username ?? ""),
+            escapeCsvValue(exportedSession.messages[0]?.content ?? ""),
+            escapeCsvValue(String(exportedSession.messages[0]?.isBot ?? false)),
+            "",
+            "",
+          ].join(","),
+        ].join("\n"),
+      );
+      expect(exportedSession.json === null ? null : JSON.parse(exportedSession.json)).toEqual(
+        exportedSession.messages.map((message) => ({
+          botId: message.botId,
+          content: message.content,
+          id: message.id,
+          isBot: message.isBot,
+          modelUsed: message.modelUsed,
+          platform: message.platform,
+          sentAt: message.sentAt,
+          sessionId: message.sessionId,
+          tokensUsed: message.tokensUsed,
+          username: message.username,
+        })),
+      );
     }),
   );
 

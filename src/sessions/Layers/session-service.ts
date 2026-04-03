@@ -45,17 +45,16 @@ import {
   SessionId,
   SessionStartOptions,
 } from "../Services/session-service";
-import type {
-  SessionEndReason,
-  SessionLimitMetric,
-  SessionServiceShape,
-  SessionStatus,
-} from "../Services/session-service";
 import { SessionMessageId, SessionMessageRecord } from "../session-message-record";
 import { SessionRecord } from "../session-record";
 import { SessionStartError } from "../session-start-error";
 
 const defaultChannel = ChannelName.makeUnsafe("lonely-chat");
+type SessionEndReason = "cost_limit" | "manual" | "timeout";
+type SessionExportFormat = "csv" | "json";
+type SessionLimitMetric = "cost" | "time";
+type SessionStatus = "active" | "cost_limit" | "ended" | "timeout";
+
 const manualEndReason: SessionEndReason = "manual";
 const mockPlatform = "mock";
 const sessionEndedStatus: SessionStatus = "ended";
@@ -105,6 +104,15 @@ interface ExecutableScenarioStep {
   readonly bot: BotRecord | null;
   readonly step: ScenarioStep;
 }
+
+const sessionExportCsvHeader = [
+  "timestamp",
+  "username",
+  "content",
+  "is_bot",
+  "model_used",
+  "tokens_used",
+] as const;
 
 const updateSessionRecord = (
   session: SessionRecord,
@@ -199,6 +207,44 @@ const makeStoredSessionMessageRecord = (row: SessionMessageRow): SessionMessageR
     tokensUsed: row.tokens_used,
     username: ChatUsername.makeUnsafe(row.username),
   });
+
+const serializeSessionMessage = (message: SessionMessageRecord) => ({
+  botId: message.botId,
+  content: message.content,
+  id: message.id,
+  isBot: message.isBot,
+  modelUsed: message.modelUsed,
+  platform: message.platform,
+  sentAt: message.sentAt,
+  sessionId: message.sessionId,
+  tokensUsed: message.tokensUsed,
+  username: message.username,
+});
+
+const escapeCsvValue = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+
+const renderCsvValue = (value: boolean | number | string | null): string => {
+  if (value === null) {
+    return "";
+  }
+
+  return escapeCsvValue(String(value));
+};
+
+const renderSessionMessagesCsv = (messages: readonly SessionMessageRecord[]): string =>
+  [
+    sessionExportCsvHeader.join(","),
+    ...messages.map((message) =>
+      [
+        renderCsvValue(message.sentAt),
+        renderCsvValue(message.username),
+        renderCsvValue(message.content),
+        renderCsvValue(message.isBot),
+        renderCsvValue(message.modelUsed),
+        renderCsvValue(message.tokensUsed),
+      ].join(","),
+    ),
+  ].join("\n");
 
 export const SessionServiceLive = Layer.effect(
   SessionService,
@@ -337,6 +383,48 @@ export const SessionServiceLive = Layer.effect(
           return rows.map(makeStoredSessionMessageRecord);
         },
       );
+
+      const getSessionById = Effect.fn("SessionService.getSessionById")(
+        function* getSessionByIdEffect(sessionId: SessionId) {
+          return yield* selectSessionColumns(
+            sql<SessionRow>`SELECT
+              id,
+              platform,
+              channel,
+              status,
+              started_at,
+              ended_at,
+              end_reason,
+              total_messages,
+              total_tokens_used,
+              total_cost_usd,
+              time_limit_seconds,
+              cost_limit_usd
+            FROM sessions
+            WHERE id = ${sessionId}
+            LIMIT 1`,
+          );
+        },
+      );
+
+      const exportSession = Effect.fn("SessionService.exportSession")(function* exportSessionEffect(
+        sessionId: SessionId,
+        format: SessionExportFormat,
+      ) {
+        const session = yield* getSessionById(sessionId);
+
+        if (session === null) {
+          return null;
+        }
+
+        const messages = yield* getSessionMessages(sessionId);
+
+        if (format === "json") {
+          return JSON.stringify(messages.map(serializeSessionMessage), null, 2);
+        }
+
+        return renderSessionMessagesCsv(messages);
+      });
 
       const stopActiveScenario = Effect.fn("SessionService.stopActiveScenario")(
         function* stopActiveScenarioEffect() {
@@ -975,6 +1063,7 @@ export const SessionServiceLive = Layer.effect(
 
       return {
         service: SessionService.of({
+          exportSession,
           getActiveAlerts,
           getActiveSession,
           getSessionMessages,
@@ -985,7 +1074,7 @@ export const SessionServiceLive = Layer.effect(
           runScenario,
           startSession,
           stopSession,
-        } satisfies SessionServiceShape),
+        }),
         serviceScope,
       };
     }),
