@@ -8,6 +8,7 @@ MODEL="${CODEX_MODEL:-gpt-5.4}"
 REASONING="${CODEX_REASONING:-high}"
 SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
 AGENT_TIMEOUT_SECONDS="${CODEX_AGENT_TIMEOUT_SECONDS:-900}"
+STALL_TIMEOUT_SECONDS="${CODEX_STALL_TIMEOUT_SECONDS:-300}"
 MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-6}"
 HEARTBEAT_SECONDS="${CODEX_HEARTBEAT_SECONDS:-15}"
 CODEX_PREVIEW_LINES="${CODEX_PREVIEW_LINES:-6}"
@@ -61,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       AGENT_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
+    --stall-timeout-seconds)
+      STALL_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
     --max-attempts-per-slice)
       MAX_ATTEMPTS_PER_SLICE="$2"
       shift 2
@@ -96,6 +101,7 @@ Options:
   --reasoning <level>     Override model reasoning effort (default: high)
   --service-tier <tier>   Override service tier (default: fast)
   --agent-timeout-seconds Stop a single Codex run after n seconds (default: 900)
+  --stall-timeout-seconds Stop a Codex run after n seconds with no log growth (default: 300)
   --max-attempts-per-slice
                          Stop after n unfinished attempts on the same slice (default: 6)
   --codex-preview-lines <n>
@@ -122,7 +128,13 @@ CI_ERRORS_FILE="$OUT_DIR/ci-errors.md"
 AGENT_TIMEOUT_FILE="$OUT_DIR/agent-timeout.md"
 STATUS_FILE="$OUT_DIR/status.json"
 EVENT_LOG_FILE="$OUT_DIR/events.log"
+LOCKED_SLICE_FILE="$OUT_DIR/locked-slice.txt"
 mkdir -p "$OUT_DIR"
+
+LOCKED_SLICE=""
+if [[ -f "$LOCKED_SLICE_FILE" ]]; then
+  LOCKED_SLICE="$(<"$LOCKED_SLICE_FILE")"
+fi
 
 log() {
   local timestamp
@@ -253,6 +265,11 @@ EOF
 
 Implement \`$TASK_OVERRIDE\` instead of auto-selecting.
 EOF
+  elif [[ -n "$LOCKED_SLICE" ]]; then
+    cat >> "$PROMPT_FILE" <<EOF
+
+Implement \`$LOCKED_SLICE\` instead of auto-selecting. This slice is locked because a prior attempt did not finish outer verification.
+EOF
   else
     cat >> "$PROMPT_FILE" <<'EOF'
 
@@ -339,6 +356,7 @@ EOF
   local watchdog_pid="$!"
   (
     local previous_size=0
+    local stalled_seconds=0
 
     while kill -0 "$agent_pid" >/dev/null 2>&1; do
       sleep "$HEARTBEAT_SECONDS"
@@ -356,9 +374,30 @@ EOF
 
       delta=$((current_size - previous_size))
       previous_size="$current_size"
+      if (( delta > 0 )); then
+        stalled_seconds=0
+      else
+        stalled_seconds=$((stalled_seconds + HEARTBEAT_SECONDS))
+      fi
       log "Codex iteration $iteration still running; pid=$agent_pid log_bytes=$current_size delta_bytes=$delta raw_log=$agent_log_file"
       if (( delta > 0 )); then
         print_codex_preview "$agent_log_file"
+      fi
+      if (( stalled_seconds >= STALL_TIMEOUT_SECONDS )); then
+        if [[ ! -f "$AGENT_TIMEOUT_FILE" ]]; then
+          cat > "$AGENT_TIMEOUT_FILE" <<EOF
+Codex produced no new log output for ${stalled_seconds} seconds.
+The process was terminated to avoid getting stuck in an internal loop or hung tool call.
+EOF
+        fi
+        log "Codex iteration $iteration stalled for ${stalled_seconds}s; terminating pid=$agent_pid"
+        kill -TERM "$agent_pid" >/dev/null 2>&1 || true
+        sleep 5
+
+        if kill -0 "$agent_pid" >/dev/null 2>&1; then
+          kill -KILL "$agent_pid" >/dev/null 2>&1 || true
+        fi
+        break
       fi
       write_status \
         "running_codex" \
@@ -524,6 +563,8 @@ while :; do
     ""
 
   if ! run_checks "$iteration"; then
+    printf '%s\n' "$slice" > "$LOCKED_SLICE_FILE"
+    LOCKED_SLICE="$slice"
     log "verification failed for $slice; see $CI_ERRORS_FILE"
     write_status \
       "verification_failed" \
@@ -556,6 +597,8 @@ while :; do
     completed_slices=$((completed_slices + 1))
     attempts_for_slice=0
     last_selected_slice=""
+    LOCKED_SLICE=""
+    rm -f "$LOCKED_SLICE_FILE"
 
     if [[ -n "$TASK_OVERRIDE" ]]; then
       log "completed $slice"
@@ -577,11 +620,15 @@ while :; do
   fi
 
   if [[ "$status" == "blocked" ]]; then
+    printf '%s\n' "$slice" > "$LOCKED_SLICE_FILE"
+    LOCKED_SLICE="$slice"
     echo "blocked: $(jq -r '.summary' "$RESULT_FILE")" >&2
     write_status "blocked" "$iteration" "$slice" "$attempts_for_slice" "Codex reported a blocker." "" ""
     exit 2
   fi
 
+  printf '%s\n' "$slice" > "$LOCKED_SLICE_FILE"
+  LOCKED_SLICE="$slice"
   if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
     echo "slice $slice returned continue $attempts_for_slice time(s); stopping" >&2
     write_status \
