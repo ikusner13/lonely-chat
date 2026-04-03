@@ -799,7 +799,13 @@ export const SessionServiceLive = Layer.effect(
                 } as const;
                 yield* platformAdapter.connect(speakerConnection);
                 const response = yield* aiClient.generateText(
-                  makeScenarioResponseRequest(bot, session.platform, scenario.topic, step.content),
+                  makeScenarioResponseRequest(
+                    bot,
+                    session.platform,
+                    yield* getSessionMessages(session.id),
+                    scenario.topic,
+                    step.content,
+                  ),
                 );
 
                 yield* sendGeneratedMessage(speakerConnection, response);
@@ -831,7 +837,7 @@ export const SessionServiceLive = Layer.effect(
           session: SessionRecord,
           bot: Parameters<typeof makeMentionResponseRequest>[0],
           trigger: ResponseTrigger,
-          request: Parameters<typeof aiClient.generateText>[0],
+          buildRequest: Effect.Effect<Parameters<typeof aiClient.generateText>[0], SqlError>,
           selectionIndex = 0,
         ) {
           const scheduledResponse = yield* Effect.gen(function* runScheduledResponseEffect() {
@@ -863,7 +869,7 @@ export const SessionServiceLive = Layer.effect(
 
             yield* platformAdapter.connect(speakerConnection);
 
-            const response = yield* aiClient.generateText(request);
+            const response = yield* aiClient.generateText(yield* buildRequest);
 
             yield* sendGeneratedMessage(speakerConnection, response);
             yield* Ref.set(
@@ -904,7 +910,9 @@ export const SessionServiceLive = Layer.effect(
               session,
               selectedSpeaker.bot,
               selectedSpeaker.reason,
-              makeMentionResponseRequest(selectedSpeaker.bot, message),
+              Effect.map(getSessionMessages(session.id), (recentMessages) =>
+                makeMentionResponseRequest(selectedSpeaker.bot, session.platform, recentMessages),
+              ),
               selectionIndex,
             );
 
@@ -952,7 +960,9 @@ export const SessionServiceLive = Layer.effect(
                 session,
                 silenceBreakerBot,
                 "silence",
-                makeSilenceBreakerRequest(silenceBreakerBot, session.platform),
+                Effect.map(getSessionMessages(session.id), (recentMessages) =>
+                  makeSilenceBreakerRequest(silenceBreakerBot, session.platform, recentMessages),
+                ),
               );
             }),
           ).pipe(Effect.forkIn(serviceScope));

@@ -556,7 +556,12 @@ describe("session service", () => {
   it.effect("responds once when one enabled bot is mentioned", () =>
     Effect.gen(function* respondsOnceWhenOneEnabledBotIsMentioned() {
       const dbPath = yield* createDatabasePath;
-      yield* insertStoredBot(dbPath, makeStoredBot());
+      yield* insertStoredBot(
+        dbPath,
+        makeStoredBot({
+          talkativeness: 0,
+        }),
+      );
       const fakeAiClient = yield* makeFakeAiClient;
       const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
       const mockPlatformAdapter = yield* makeMockPlatformAdapter;
@@ -571,17 +576,23 @@ describe("session service", () => {
 
         yield* sessionService.startSession();
         yield* Effect.yieldNow;
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "warming up the room",
+          username: ChatUsername.makeUnsafe("viewer-0"),
+        });
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
 
         yield* mockPlatformAdapter.emitIncomingMessage({
           channel: mockBot.channel,
           text: "hey @pixel you there?",
           username: ChatUsername.makeUnsafe("viewer-1"),
         });
-        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
 
         yield* TestClock.adjust("3 seconds");
 
-        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+        expect(yield* waitForStoredSessionMessages(dbPath, 3)).toHaveLength(3);
         expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
           {
             botId: mockBot.botId,
@@ -592,12 +603,30 @@ describe("session service", () => {
             username: ChatUsername.makeUnsafe("pixel"),
           },
         ]);
-        expect(yield* fakeAiClient.getRequests).toEqual([
-          expect.objectContaining({
-            botName: "Pixel",
-            model: "openrouter/mock-model",
-          }),
-        ]);
+        const [request] = yield* fakeAiClient.getRequests;
+
+        expect(request).toMatchObject({
+          botName: "Pixel",
+          model: "openrouter/mock-model",
+        });
+        expect(request?.messages).toEqual(
+          expect.arrayContaining([
+            {
+              content: "[external] viewer-0: warming up the room",
+              role: "user",
+            },
+            {
+              content: "[external] viewer-1: hey @pixel you there?",
+              role: "user",
+            },
+          ]),
+        );
+        expect(request?.settings).toMatchObject({
+          fallbackModels: ["openrouter/fallback-model"],
+          maxOutputTokens: 180,
+          stopSequences: ["\n"],
+          temperature: 0.8,
+        });
       }).pipe(Effect.provide(appLayer));
     }),
   );

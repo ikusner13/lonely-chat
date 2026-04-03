@@ -1,4 +1,5 @@
 import { OpenRouterClient } from "@effect/ai-openrouter";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -35,6 +36,7 @@ const toOpenRouterMessages = (
   }));
 
 const attemptModelsForRequest = (request: AiGenerateRequest): readonly string[] => [
+  request.model,
   request.model,
   ...(request.settings?.fallbackModels ?? []),
 ];
@@ -149,6 +151,12 @@ const generateWithFallback = (
 
     if (remainingModels.length === 0) {
       return yield* Effect.fail(attempt.failure);
+    }
+
+    const [nextModel] = remainingModels;
+
+    if (currentModel === request.model && nextModel === request.model) {
+      yield* Effect.sleep(Duration.seconds(1));
     }
 
     return yield* generateWithFallback(client, request, remainingModels);

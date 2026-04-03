@@ -1,10 +1,11 @@
 import { Schema } from "effect";
 
-import { AiGenerationSettings, AiModelName, BotName } from "../ai/Services/ai-client";
-import type { AiGenerateRequest, AiPromptMessage } from "../ai/Services/ai-client";
+import { buildBotPromptMessages, buildGenerationSettings } from "../ai/prompt-assembly";
+import { AiModelName, BotName } from "../ai/Services/ai-client";
+import type { AiGenerateRequest } from "../ai/Services/ai-client";
 import { BotRecord } from "../bots/bot-record";
 import { BotId } from "../platforms/Services/platform-adapter";
-import type { ChatMessage, PlatformName } from "../platforms/Services/platform-adapter";
+import type { PlatformName } from "../platforms/Services/platform-adapter";
 import type { SessionMessageRecord } from "../sessions/session-message-record";
 
 const responderCap = 3;
@@ -68,51 +69,6 @@ const escapeRegExp = (value: string): string => value.replaceAll(/[.*+?^${}()|[\
 
 const makeMentionPattern = (botName: string): RegExp =>
   new RegExp(`(^|[^\\p{L}\\p{N}_])@${escapeRegExp(botName)}(?=$|[^\\p{L}\\p{N}_])`, "iu");
-
-const buildStructuredSystemPrompt = (bot: BotRecord, platform: PlatformName): string => {
-  const vocabularyRules = bot.vocabularyRules.map((rule) => `- NEVER: ${rule}`);
-  const promptLines = [
-    `You are ${bot.name}. You are chatting in a live stream chat on ${platform}.`,
-    "",
-    bot.personality,
-    "",
-    bot.description,
-    "",
-    "RULES:",
-    `- Keep responses between ${bot.responseLength.min} and ${bot.responseLength.max} words`,
-    "- DO NOT include your name or any prefix in messages",
-    "- DO NOT use action tags like *action*",
-    "- DO NOT continue or respond as other chatters",
-    "- Just write your direct response",
-    ...vocabularyRules,
-  ];
-
-  if (bot.postHistoryPrompt !== null) {
-    promptLines.push("", bot.postHistoryPrompt);
-  }
-
-  return promptLines.join("\n");
-};
-
-const buildSystemPrompt = (bot: BotRecord, platform: PlatformName): string =>
-  bot.systemPrompt ?? buildStructuredSystemPrompt(bot, platform);
-
-const buildExampleMessages = (bot: BotRecord): readonly AiPromptMessage[] =>
-  bot.exampleMessages.map((message) => ({
-    content: `[example] ${bot.name}: ${message}`,
-    role: "assistant",
-  }));
-
-const buildGenerationSettings = (bot: BotRecord): AiGenerationSettings =>
-  new AiGenerationSettings({
-    fallbackModels: bot.fallbackModels.map((model) => AiModelName.makeUnsafe(model)),
-    maxOutputTokens: bot.maxTokens,
-    stopSequences: ["\n"],
-    temperature: bot.temperature,
-  });
-
-const formatIncomingMessage = (message: ChatMessage): string =>
-  `[external] ${message.username}: ${message.text}`;
 
 export const findMentionedBots = (
   messageText: string,
@@ -350,20 +306,13 @@ export const advanceSpeakerState = (
 
 export const makeMentionResponseRequest = (
   bot: BotRecord,
-  message: ChatMessage,
+  platform: PlatformName,
+  recentMessages: readonly SessionMessageRecord[],
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
-  messages: [
-    {
-      content: buildSystemPrompt(bot, message.platform),
-      role: "system",
-    },
-    ...buildExampleMessages(bot),
-    {
-      content: formatIncomingMessage(message),
-      role: "user",
-    },
-  ],
+  messages: buildBotPromptMessages(bot, platform, {
+    recentMessages,
+  }),
   model: AiModelName.makeUnsafe(bot.model),
   settings: buildGenerationSettings(bot),
 });
@@ -371,19 +320,13 @@ export const makeMentionResponseRequest = (
 export const makeSilenceBreakerRequest = (
   bot: BotRecord,
   platform: PlatformName,
+  recentMessages: readonly SessionMessageRecord[],
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
-  messages: [
-    {
-      content: buildSystemPrompt(bot, platform),
-      role: "system",
-    },
-    ...buildExampleMessages(bot),
-    {
-      content: "Start a new conversation topic naturally.",
-      role: "user",
-    },
-  ],
+  messages: buildBotPromptMessages(bot, platform, {
+    finalUserPrompt: "Start a new conversation topic naturally.",
+    recentMessages,
+  }),
   model: AiModelName.makeUnsafe(bot.model),
   settings: buildGenerationSettings(bot),
 });
@@ -391,23 +334,17 @@ export const makeSilenceBreakerRequest = (
 export const makeScenarioResponseRequest = (
   bot: BotRecord,
   platform: PlatformName,
+  recentMessages: readonly SessionMessageRecord[],
   topic: string,
   hint: string | null,
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
-  messages: [
-    {
-      content: buildSystemPrompt(bot, platform),
-      role: "system",
-    },
-    ...buildExampleMessages(bot),
-    {
-      content: [`Scenario topic: ${topic}`, hint === null ? null : `Step hint: ${hint}`]
-        .filter((line): line is string => line !== null)
-        .join("\n"),
-      role: "user",
-    },
-  ],
+  messages: buildBotPromptMessages(bot, platform, {
+    finalUserPrompt: [`Scenario topic: ${topic}`, hint === null ? null : `Step hint: ${hint}`]
+      .filter((line): line is string => line !== null)
+      .join("\n"),
+    recentMessages,
+  }),
   model: AiModelName.makeUnsafe(bot.model),
   settings: buildGenerationSettings(bot),
 });

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import { TestClock } from "effect/testing";
 
 import { makeFakeAiClient } from "./Layers/fake-ai-client";
 import { makeOpenRouterAiClient } from "./Layers/openrouter-ai-client";
@@ -304,9 +306,20 @@ describe("OpenRouter ai client", () => {
           }),
         };
 
-        const failure = yield* aiClient.generateText(request).pipe(Effect.flip);
+        const failureFiber = yield* aiClient
+          .generateText(request)
+          .pipe(Effect.flip, Effect.forkChild);
 
-        expect(attemptedModels).toEqual(["openai/gpt-5-mini", "openai/gpt-4.1-mini"]);
+        yield* TestClock.adjust("1 second");
+        yield* Effect.yieldNow;
+
+        const failure = yield* Fiber.join(failureFiber);
+
+        expect(attemptedModels).toEqual([
+          "openai/gpt-5-mini",
+          "openai/gpt-5-mini",
+          "openai/gpt-4.1-mini",
+        ]);
         expect(failure).toBeInstanceOf(AiGenerationError);
         expect(failure).toMatchObject({
           botName: "Pixel",

@@ -7,6 +7,7 @@ import { SessionMessageId, SessionMessageRecord } from "../sessions/session-mess
 import {
   BotSpeakerState,
   calculateResponseDelay,
+  makeMentionResponseRequest,
   selectSilenceBreaker,
   selectSpeakers,
 } from "./mention-response";
@@ -234,5 +235,95 @@ describe("speaker selection", () => {
         now,
       })?.id,
     ).toBe(echo.id);
+  });
+
+  it("assembles live mention prompts from the recent chat window and fallback settings", () => {
+    const pixel = makeBot({
+      exampleMessages: ["clip it", "keep it moving"],
+      fallbackModels: ["openrouter/fallback-model"],
+      postHistoryPrompt: "Stay dry and brief.",
+    });
+    const request = makeMentionResponseRequest(pixel, "mock", [
+      new SessionMessageRecord({
+        botId: null,
+        content: "stale opener",
+        id: SessionMessageId.makeUnsafe("message-stale"),
+        isBot: false,
+        modelUsed: null,
+        platform: "mock",
+        sentAt: "2026-04-02T23:59:59.000Z",
+        sessionId: SessionId.makeUnsafe("session-1"),
+        tokensUsed: null,
+        username: ChatUsername.makeUnsafe("viewer-old"),
+      }),
+      new SessionMessageRecord({
+        botId: null,
+        content: "fresh setup",
+        id: SessionMessageId.makeUnsafe("message-fresh"),
+        isBot: false,
+        modelUsed: null,
+        platform: "mock",
+        sentAt: "2026-04-03T00:09:30.000Z",
+        sessionId: SessionId.makeUnsafe("session-1"),
+        tokensUsed: null,
+        username: ChatUsername.makeUnsafe("viewer-1"),
+      }),
+      new SessionMessageRecord({
+        botId: PlatformBotId.makeUnsafe("bot-echo"),
+        content: "bot follow-up",
+        id: SessionMessageId.makeUnsafe("message-bot"),
+        isBot: true,
+        modelUsed: "openrouter/mock-model",
+        platform: "mock",
+        sentAt: "2026-04-03T00:10:00.000Z",
+        sessionId: SessionId.makeUnsafe("session-1"),
+        tokensUsed: 14,
+        username: ChatUsername.makeUnsafe("echo"),
+      }),
+    ]);
+
+    expect(request.messages).toEqual([
+      {
+        content: [
+          "You are pixel. You are chatting in a live stream chat on mock.",
+          "",
+          "dry humor",
+          "",
+          "test bot",
+          "",
+          "RULES:",
+          "- Keep responses between 3 and 12 words",
+          "- DO NOT include your name or any prefix in messages",
+          "- DO NOT use action tags like *action*",
+          "- DO NOT continue or respond as other chatters",
+          "- Just write your direct response",
+          "",
+          "Stay dry and brief.",
+        ].join("\n"),
+        role: "system",
+      },
+      {
+        content: "[example] pixel: clip it",
+        role: "assistant",
+      },
+      {
+        content: "[example] pixel: keep it moving",
+        role: "assistant",
+      },
+      {
+        content: "[external] viewer-1: fresh setup",
+        role: "user",
+      },
+      {
+        content: "echo: bot follow-up",
+        role: "user",
+      },
+    ]);
+    expect(request.settings).toMatchObject({
+      fallbackModels: ["openrouter/fallback-model"],
+      maxOutputTokens: 120,
+      stopSequences: ["\n"],
+      temperature: 0.8,
+    });
   });
 });
