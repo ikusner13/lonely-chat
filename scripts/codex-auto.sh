@@ -19,6 +19,11 @@ NO_COMMIT=false
 ALLOW_DIRTY=false
 TASK_OVERRIDE=""
 EXTRA_PROMPT=""
+CURRENT_AGENT_PID=""
+CURRENT_HELPER_PIDS=()
+CURRENT_ITERATION="0"
+CURRENT_LOG_FILE=""
+INTERRUPTED=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -96,7 +101,7 @@ Options:
   --pack                  Run `vp pack` after agent execution
   --no-commit             Do not create commits
   --allow-dirty           Skip the clean-worktree preflight check
-  --max-iterations <n>    Stop after n completed slices in auto-select mode (0 means unlimited)
+  --max-iterations <n>    Stop after n loop iterations in auto-select mode (0 means unlimited)
   --model <name>          Override model (default: gpt-5.4)
   --reasoning <level>     Override model reasoning effort (default: high)
   --service-tier <tier>   Override service tier (default: fast)
@@ -171,6 +176,56 @@ write_status() {
       log_file: ($log_file | if . == "" then null else . end),
       updated_at: $updated_at
     }' > "$STATUS_FILE"
+}
+
+cleanup_active_children() {
+  local pid
+
+  if [[ -n "$CURRENT_AGENT_PID" ]]; then
+    kill -TERM "$CURRENT_AGENT_PID" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "$CURRENT_AGENT_PID" >/dev/null 2>&1 || true
+  fi
+
+  for pid in "${CURRENT_HELPER_PIDS[@]:-}"; do
+    if [[ -n "$pid" ]]; then
+      kill -TERM "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+
+  pkill -TERM -P $$ >/dev/null 2>&1 || true
+  sleep 1
+  pkill -KILL -P $$ >/dev/null 2>&1 || true
+
+  wait >/dev/null 2>&1 || true
+  CURRENT_AGENT_PID=""
+  CURRENT_HELPER_PIDS=()
+}
+
+finalize_exit() {
+  if [[ -n "$CURRENT_AGENT_PID" || "${#CURRENT_HELPER_PIDS[@]}" -gt 0 ]]; then
+    cleanup_active_children
+
+    if [[ "$INTERRUPTED" == "1" ]]; then
+      write_status \
+        "stopped" \
+        "$CURRENT_ITERATION" \
+        "" \
+        "" \
+        "Interrupted by SIGINT or SIGTERM." \
+        "" \
+        "$CURRENT_LOG_FILE"
+    else
+      write_status \
+        "stopped" \
+        "$CURRENT_ITERATION" \
+        "" \
+        "" \
+        "codex-auto exited while child processes were still active." \
+        "" \
+        "$CURRENT_LOG_FILE"
+    fi
+  fi
 }
 
 print_prefixed_lines() {
@@ -253,6 +308,9 @@ stream_filter() {
     esac
   done
 }
+
+trap 'INTERRUPTED=1; exit 130' INT TERM
+trap finalize_exit EXIT
 
 require_command() {
   local cmd="$1"
@@ -382,6 +440,8 @@ run_agent() {
   mkfifo "$agent_fifo"
   log "starting Codex iteration $iteration; raw log: $agent_log_file"
   write_status "running_codex" "$iteration" "" "" "Starting Codex agent run." "" "$agent_log_file"
+  CURRENT_ITERATION="$iteration"
+  CURRENT_LOG_FILE="$agent_log_file"
 
   cat "$agent_fifo" | tee "$agent_log_file" | stream_filter &
   local stream_pid="$!"
@@ -397,28 +457,12 @@ run_agent() {
     --output-last-message "$RESULT_FILE" \
     - < "$PROMPT_FILE" >"$agent_fifo" 2>"$agent_stderr_file" &
   local agent_pid="$!"
+  CURRENT_AGENT_PID="$agent_pid"
   write_status "running_codex" "$iteration" "" "" "Codex agent is running." "$agent_pid" "$agent_log_file"
-
-  (
-    sleep "$AGENT_TIMEOUT_SECONDS"
-
-    if kill -0 "$agent_pid" >/dev/null 2>&1; then
-      cat > "$AGENT_TIMEOUT_FILE" <<EOF
-Codex exceeded the per-run timeout of ${AGENT_TIMEOUT_SECONDS} seconds.
-The process was terminated to avoid getting stuck in an internal repair loop.
-EOF
-      kill -TERM "$agent_pid" >/dev/null 2>&1 || true
-      sleep 5
-
-      if kill -0 "$agent_pid" >/dev/null 2>&1; then
-        kill -KILL "$agent_pid" >/dev/null 2>&1 || true
-      fi
-    fi
-  ) &
-  local watchdog_pid="$!"
   (
     local previous_size=0
     local stalled_seconds=0
+    local elapsed_seconds=0
     local current_stdout_size=0
     local current_stderr_size=0
     local current_size=0
@@ -426,8 +470,24 @@ EOF
 
     while kill -0 "$agent_pid" >/dev/null 2>&1; do
       sleep "$HEARTBEAT_SECONDS"
+      elapsed_seconds=$((elapsed_seconds + HEARTBEAT_SECONDS))
 
       if ! kill -0 "$agent_pid" >/dev/null 2>&1; then
+        break
+      fi
+
+      if (( elapsed_seconds >= AGENT_TIMEOUT_SECONDS )); then
+        cat > "$AGENT_TIMEOUT_FILE" <<EOF
+Codex exceeded the per-run timeout of ${AGENT_TIMEOUT_SECONDS} seconds.
+The process was terminated to avoid getting stuck in an internal repair loop.
+EOF
+        log "Codex iteration $iteration exceeded the per-run timeout of ${AGENT_TIMEOUT_SECONDS}s; terminating pid=$agent_pid"
+        kill -TERM "$agent_pid" >/dev/null 2>&1 || true
+        sleep 5
+
+        if kill -0 "$agent_pid" >/dev/null 2>&1; then
+          kill -KILL "$agent_pid" >/dev/null 2>&1 || true
+        fi
         break
       fi
 
@@ -479,6 +539,7 @@ EOF
     done
   ) &
   local heartbeat_pid="$!"
+  CURRENT_HELPER_PIDS=("$stream_pid" "$heartbeat_pid")
   local agent_status=0
 
   if wait "$agent_pid"; then
@@ -487,12 +548,13 @@ EOF
     agent_status="$?"
   fi
 
-  kill "$watchdog_pid" >/dev/null 2>&1 || true
-  wait "$watchdog_pid" >/dev/null 2>&1 || true
   kill "$heartbeat_pid" >/dev/null 2>&1 || true
   wait "$heartbeat_pid" >/dev/null 2>&1 || true
   wait "$stream_pid" >/dev/null 2>&1 || true
   rm -f "$agent_fifo"
+  CURRENT_AGENT_PID=""
+  CURRENT_HELPER_PIDS=()
+  CURRENT_LOG_FILE=""
 
   if [[ -f "$AGENT_TIMEOUT_FILE" ]]; then
     echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s or stalled for ${STALL_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE, $agent_log_file, and $agent_stderr_file" >&2
@@ -595,9 +657,9 @@ write_status "idle" "0" "" "" "codex-auto initialized." "" ""
 
 iteration=1
 while :; do
-  if [[ -z "$TASK_OVERRIDE" && "$MAX_ITERATIONS" -gt 0 && "$completed_slices" -ge "$MAX_ITERATIONS" ]]; then
-    echo "completed $completed_slices slice(s); reached max iterations: $MAX_ITERATIONS"
-    write_status "completed" "$iteration" "" "" "Reached the requested completed-slice limit." "" ""
+  if [[ -z "$TASK_OVERRIDE" && "$MAX_ITERATIONS" -gt 0 && "$iteration" -gt "$MAX_ITERATIONS" ]]; then
+    echo "completed $completed_slices slice(s); reached max loop iterations: $MAX_ITERATIONS"
+    write_status "completed" "$iteration" "" "" "Reached the requested loop-iteration limit." "" ""
     exit 0
   fi
 
