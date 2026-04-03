@@ -15,6 +15,11 @@ export default defineConfig({
       typeAware: true,
       typeCheck: true,
     },
+    rules: {
+      // Allow async/await because async test code conflicts with
+      // `promise-function-async` otherwise.
+      "no-async-await": "off",
+    },
   },
   pack: {
     deps: {
