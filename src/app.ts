@@ -39,6 +39,7 @@ import { ScenarioId } from "./scenarios/scenario-record";
 import { ScenarioService } from "./scenarios/Services/scenario-service";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
+import type { SessionAlert } from "./sessions/Services/session-service";
 import type { SessionMessageRecord } from "./sessions/session-message-record";
 import type { SessionRecord } from "./sessions/session-record";
 import type { ScenarioEditorFormErrors } from "./scenarios/scenario-editor-fields";
@@ -70,6 +71,20 @@ interface ChatViewerState {
   readonly selectedSession: SessionRecord | null;
 }
 
+interface DashboardState {
+  readonly activeAlerts: readonly SessionAlert[];
+  readonly activeSession: SessionRecord | null;
+  readonly mostRecentSession: SessionRecord | null;
+}
+
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 const formatActiveDuration = (startedAt: string): string => {
   const durationMilliseconds = Math.max(0, Date.now() - Date.parse(startedAt));
   const durationSeconds = Math.floor(durationMilliseconds / 1000);
@@ -81,15 +96,55 @@ const formatActiveDuration = (startedAt: string): string => {
   return `${minutes}:${seconds}`;
 };
 
-const renderSessionDetails = (
-  activeSession: SessionRecord | null,
-  mostRecentSession: SessionRecord | null,
-): string => {
+const formatCostUsd = (value: number): string => `$${value.toFixed(4)}`;
+
+const renderAlertBanner = (alerts: readonly SessionAlert[]): string => {
+  if (alerts.length === 0) {
+    return "";
+  }
+
+  return `<aside>
+        <h3>Alert Banner</h3>
+        <ul>
+          ${alerts
+            .map(
+              (alert) =>
+                `<li>${escapeHtml(
+                  `${alert.metric} alert: ${alert.thresholdPercent}% of ${alert.limitValue} reached`,
+                )}</li>`,
+            )
+            .join("")}
+        </ul>
+      </aside>`;
+};
+
+const renderLimitSummary = (session: SessionRecord): string => {
+  const costLimitMarkup =
+    session.costLimitUsd === null
+      ? "<p>Cost limit: none</p>"
+      : `<p>Cost limit: ${formatCostUsd(session.costLimitUsd)}</p>`;
+  const timeLimitMarkup =
+    session.timeLimitSeconds === null
+      ? "<p>Time limit: none</p>"
+      : `<p>Time limit: ${session.timeLimitSeconds}s</p>`;
+
+  return `<p>Total messages: ${session.totalMessages}</p>
+        <p>Total tokens: ${session.totalTokensUsed}</p>
+        <p>Total cost: ${formatCostUsd(session.totalCostUsd)}</p>
+        ${timeLimitMarkup}
+        ${costLimitMarkup}`;
+};
+
+const renderSessionDetails = (state: DashboardState): string => {
+  const { activeAlerts, activeSession, mostRecentSession } = state;
+
   if (activeSession !== null) {
-    return `<p>Status: active</p>
+    return `${renderAlertBanner(activeAlerts)}
+        <p>Status: active</p>
         <p>Platform: ${activeSession.platform}</p>
         <p>Channel: ${activeSession.channel}</p>
         <p>Duration: ${formatActiveDuration(activeSession.startedAt)}</p>
+        ${renderLimitSummary(activeSession)}
         <form action="/session/stop" method="post">
           <button type="submit">Stop Session</button>
         </form>`;
@@ -111,10 +166,7 @@ const renderSessionDetails = (
         </form>`;
 };
 
-const renderDashboardDocument = (
-  activeSession: SessionRecord | null,
-  mostRecentSession: SessionRecord | null,
-): string => `<!doctype html>
+const renderDashboardDocument = (state: DashboardState): string => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -132,19 +184,11 @@ const renderDashboardDocument = (
       </nav>
       <section>
         <h2>Session</h2>
-        ${renderSessionDetails(activeSession, mostRecentSession)}
+        ${renderSessionDetails(state)}
       </section>
     </main>
   </body>
 </html>`;
-
-const escapeHtml = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 
 const serializeForInlineScript = (value: unknown): string =>
   JSON.stringify(value).replaceAll("<", "\\u003c");
@@ -597,6 +641,7 @@ const renderScenarioManagerDocument = (
 
 const loadDashboardState = Effect.fn("App.loadDashboardState")(function* loadDashboardState() {
   return yield* Effect.all({
+    activeAlerts: SessionService.use((sessionService) => sessionService.getActiveAlerts()),
     activeSession: SessionService.use((sessionService) => sessionService.getActiveSession()),
     mostRecentSession: SessionService.use((sessionService) =>
       sessionService.getMostRecentSession(),
@@ -734,12 +779,17 @@ const serializeBot = (bot: BotRecord) => ({
 
 const serializeSession = (session: SessionRecord) => ({
   channel: session.channel,
+  costLimitUsd: session.costLimitUsd,
   endReason: session.endReason,
   endedAt: session.endedAt,
   id: session.id,
   platform: session.platform,
   startedAt: session.startedAt,
   status: session.status,
+  timeLimitSeconds: session.timeLimitSeconds,
+  totalCostUsd: session.totalCostUsd,
+  totalMessages: session.totalMessages,
+  totalTokensUsed: session.totalTokensUsed,
 });
 
 const serializeSessionMessage = (message: SessionMessageRecord) => ({
@@ -896,9 +946,9 @@ export const createApp = (
   );
 
   app.get("/", async (context) => {
-    const { activeSession, mostRecentSession } = await runtime.runPromise(loadDashboardState());
+    const state = await runtime.runPromise(loadDashboardState());
 
-    return context.html(renderDashboardDocument(activeSession, mostRecentSession));
+    return context.html(renderDashboardDocument(state));
   });
 
   app.get("/chat", async (context) => {

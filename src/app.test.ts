@@ -20,7 +20,7 @@ import { ScenarioEditorFormValues } from "./scenarios/scenario-editor-fields";
 import { ScenarioServiceLive } from "./scenarios/Layers/scenario-service";
 import { ScenarioService } from "./scenarios/Services/scenario-service";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
-import { SessionService } from "./sessions/Services/session-service";
+import { SessionService, SessionStartOptions } from "./sessions/Services/session-service";
 
 const okStatus = 200;
 const seeOtherStatus = 303;
@@ -420,6 +420,42 @@ describe("app shell", () => {
       expect(stoppedBody).toContain("Status: idle");
       expect(stoppedBody).toContain("Last session ended: manual");
       expect(stoppedBody).toContain("Start Session");
+    }),
+  );
+
+  it.effect("renders active cost alerts on the dashboard", () =>
+    Effect.gen(function* rendersActiveCostAlertsOnTheDashboard() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+
+      yield* fromPromise(
+        runtime.runPromise(
+          SessionService.use((sessionService) =>
+            sessionService.startSession(
+              new SessionStartOptions({
+                costLimitUsd: 1,
+                timeLimitSeconds: null,
+              }),
+            ),
+          ),
+        ),
+      );
+      yield* fromPromise(
+        runtime.runPromise(
+          SessionService.use((sessionService) => sessionService.recordCost(50, 0.75)),
+        ),
+      );
+
+      const response = yield* requestApp(app, "http://localhost/");
+      const body = yield* fromPromise(response.text());
+
+      expect(response.status).toBe(okStatus);
+      expect(body).toContain("Alert Banner");
+      expect(body).toContain("cost alert: 50% of 1 reached");
+      expect(body).toContain("cost alert: 75% of 1 reached");
+      expect(body).toContain("Total cost: $0.7500");
+      expect(body).toContain("Cost limit: $1.0000");
     }),
   );
 

@@ -120,7 +120,7 @@ Use it with:
 - Spec inputs: `specs/scenarios.md`, `specs/technical-orchestrator.md`, `specs/ui.md`
 - Verify: ordered step execution tests, `say`/`respond`/`wait` tests, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-12: Add time and cost limits with alert thresholds
+### [x] VS-12: Add time and cost limits with alert thresholds
 
 - Depends on: `VS-05`
 - Outcome: Sessions emit 50/75/90% alerts and end automatically when the configured limit is crossed.

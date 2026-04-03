@@ -39,9 +39,15 @@ import type {
 } from "../../platforms/Services/platform-adapter";
 import type { ScenarioId, ScenarioRecord, ScenarioStep } from "../../scenarios/scenario-record";
 import { ScenarioService } from "../../scenarios/Services/scenario-service";
-import { SessionService, SessionId } from "../Services/session-service";
+import {
+  SessionAlert,
+  SessionService,
+  SessionId,
+  SessionStartOptions,
+} from "../Services/session-service";
 import type {
   SessionEndReason,
+  SessionLimitMetric,
   SessionServiceShape,
   SessionStatus,
 } from "../Services/session-service";
@@ -54,17 +60,26 @@ const manualEndReason: SessionEndReason = "manual";
 const mockPlatform = "mock";
 const sessionEndedStatus: SessionStatus = "ended";
 const sessionStartedStatus: SessionStatus = "active";
-const liveMessageBufferCapacity = 128;
+const sessionTimedOutStatus: SessionStatus = "timeout";
+const sessionCostLimitStatus: SessionStatus = "cost_limit";
+const liveBufferCapacity = 128;
 const silenceThresholdMs = 15_000;
+const sessionLimitCheckInterval = Duration.seconds(1);
+const alertThresholdPercents = [50, 75, 90] as const;
 
 interface SessionRow {
   readonly channel: string;
+  readonly cost_limit_usd: number | null;
   readonly end_reason: SessionEndReason | null;
   readonly ended_at: string | null;
   readonly id: string;
   readonly platform: typeof mockPlatform;
   readonly started_at: string;
   readonly status: SessionStatus;
+  readonly time_limit_seconds: number | null;
+  readonly total_cost_usd: number;
+  readonly total_messages: number;
+  readonly total_tokens_used: number;
 }
 
 interface SessionMessageRow {
@@ -91,15 +106,52 @@ interface ExecutableScenarioStep {
   readonly step: ScenarioStep;
 }
 
+const updateSessionRecord = (
+  session: SessionRecord,
+  overrides: Partial<{
+    readonly channel: SessionRecord["channel"];
+    readonly costLimitUsd: SessionRecord["costLimitUsd"];
+    readonly endReason: SessionRecord["endReason"];
+    readonly endedAt: SessionRecord["endedAt"];
+    readonly id: SessionRecord["id"];
+    readonly platform: SessionRecord["platform"];
+    readonly startedAt: SessionRecord["startedAt"];
+    readonly status: SessionRecord["status"];
+    readonly timeLimitSeconds: SessionRecord["timeLimitSeconds"];
+    readonly totalCostUsd: SessionRecord["totalCostUsd"];
+    readonly totalMessages: SessionRecord["totalMessages"];
+    readonly totalTokensUsed: SessionRecord["totalTokensUsed"];
+  }>,
+): SessionRecord =>
+  new SessionRecord({
+    channel: overrides.channel ?? session.channel,
+    costLimitUsd: overrides.costLimitUsd ?? session.costLimitUsd,
+    endReason: overrides.endReason ?? session.endReason,
+    endedAt: overrides.endedAt ?? session.endedAt,
+    id: overrides.id ?? session.id,
+    platform: overrides.platform ?? session.platform,
+    startedAt: overrides.startedAt ?? session.startedAt,
+    status: overrides.status ?? session.status,
+    timeLimitSeconds: overrides.timeLimitSeconds ?? session.timeLimitSeconds,
+    totalCostUsd: overrides.totalCostUsd ?? session.totalCostUsd,
+    totalMessages: overrides.totalMessages ?? session.totalMessages,
+    totalTokensUsed: overrides.totalTokensUsed ?? session.totalTokensUsed,
+  });
+
 const makeSessionRecord = (row: SessionRow): SessionRecord =>
   new SessionRecord({
     channel: ChannelName.makeUnsafe(row.channel),
+    costLimitUsd: row.cost_limit_usd,
     endReason: row.end_reason,
     endedAt: row.ended_at,
     id: SessionId.makeUnsafe(row.id),
     platform: row.platform,
     startedAt: row.started_at,
     status: row.status,
+    timeLimitSeconds: row.time_limit_seconds,
+    totalCostUsd: row.total_cost_usd,
+    totalMessages: row.total_messages,
+    totalTokensUsed: row.total_tokens_used,
   });
 
 const selectSessionColumns = (
@@ -119,6 +171,7 @@ const selectSessionColumns = (
 const makeSessionMessageRecord = (
   sessionId: SessionId,
   message: ChatMessage,
+  sentAt: string,
 ): SessionMessageRecord =>
   new SessionMessageRecord({
     botId: message.botId ?? null,
@@ -127,7 +180,7 @@ const makeSessionMessageRecord = (
     isBot: message.direction === "outgoing",
     modelUsed: null,
     platform: message.platform,
-    sentAt: new Date().toISOString(),
+    sentAt,
     sessionId,
     tokensUsed: null,
     username: message.username,
@@ -157,28 +210,74 @@ export const SessionServiceLive = Layer.effect(
       const sql = yield* SqlClient.SqlClient;
       const platformAdapter = yield* PlatformAdapter;
       const serviceScope = yield* Scope.make();
+      const liveAlertsPubSub = yield* PubSub.bounded<SessionAlert>({
+        capacity: liveBufferCapacity,
+      });
       const liveMessagesPubSub = yield* PubSub.bounded<SessionMessageRecord>({
-        capacity: liveMessageBufferCapacity,
+        capacity: liveBufferCapacity,
       });
       const activeSessionRef = yield* Ref.make<SessionRecord | null>(
         yield* selectSessionColumns(
-          sql<SessionRow>`SELECT id, platform, channel, status, started_at, ended_at, end_reason
+          sql<SessionRow>`SELECT
+              id,
+              platform,
+              channel,
+              status,
+              started_at,
+              ended_at,
+              end_reason,
+              total_messages,
+              total_tokens_used,
+              total_cost_usd,
+              time_limit_seconds,
+              cost_limit_usd
             FROM sessions
             WHERE status = ${sessionStartedStatus}
             ORDER BY started_at DESC
             LIMIT 1`,
         ),
       );
+      const activeAlertsRef = yield* Ref.make<readonly SessionAlert[]>([]);
       const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
       const scenarioFiberRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const scheduledResponseFibersRef = yield* Ref.make<readonly SessionTaskFiber[]>([]);
+      const sessionTimerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const silenceBreakerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
       const lastActivityAtRef = yield* Ref.make<number | null>(null);
 
+      const getCurrentTimestamp = Effect.fn("SessionService.getCurrentTimestamp")(
+        function* getCurrentTimestampEffect() {
+          return new Date(yield* Clock.currentTimeMillis).toISOString();
+        },
+      );
+
+      const updateActiveSession = Effect.fn("SessionService.updateActiveSession")(
+        function* updateActiveSessionEffect(
+          sessionId: SessionId,
+          update: (session: SessionRecord) => SessionRecord,
+        ) {
+          const activeSession = yield* Ref.get(activeSessionRef);
+
+          if (activeSession?.id !== sessionId) {
+            return null;
+          }
+
+          const nextSession = update(activeSession);
+
+          yield* Ref.set(activeSessionRef, nextSession);
+
+          return nextSession;
+        },
+      );
+
       const persistMessage = Effect.fn("SessionService.persistMessage")(
         function* persistMessageEffect(sessionId: SessionId, message: ChatMessage) {
-          const storedMessage = makeSessionMessageRecord(sessionId, message);
+          const storedMessage = makeSessionMessageRecord(
+            sessionId,
+            message,
+            yield* getCurrentTimestamp(),
+          );
 
           yield* sql`INSERT INTO session_messages (
             id,
@@ -205,8 +304,13 @@ export const SessionServiceLive = Layer.effect(
             ${storedMessage.sentAt}
           )`;
           yield* sql`UPDATE sessions
-          SET total_messages = total_messages + 1
-          WHERE id = ${sessionId}`;
+            SET total_messages = total_messages + 1
+            WHERE id = ${sessionId}`;
+          yield* updateActiveSession(sessionId, (session) =>
+            updateSessionRecord(session, {
+              totalMessages: session.totalMessages + 1,
+            }),
+          );
 
           yield* PubSub.publish(liveMessagesPubSub, storedMessage);
           yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
@@ -244,6 +348,195 @@ export const SessionServiceLive = Layer.effect(
 
           yield* Fiber.interrupt(scenarioFiber);
           yield* Ref.set(scenarioFiberRef, null);
+        },
+      );
+
+      const interruptTrackedFibers = Effect.fn("SessionService.interruptTrackedFibers")(
+        function* interruptTrackedFibersEffect() {
+          const scheduledResponseFibers = yield* Ref.get(scheduledResponseFibersRef);
+
+          for (const fiber of scheduledResponseFibers) {
+            yield* Fiber.interrupt(fiber);
+          }
+
+          yield* Ref.set(scheduledResponseFibersRef, []);
+        },
+      );
+
+      const stopSilenceBreaker = Effect.fn("SessionService.stopSilenceBreaker")(
+        function* stopSilenceBreakerEffect() {
+          const silenceBreaker = yield* Ref.get(silenceBreakerRef);
+
+          if (silenceBreaker === null) {
+            return;
+          }
+
+          yield* Fiber.interrupt(silenceBreaker);
+          yield* Ref.set(silenceBreakerRef, null);
+        },
+      );
+
+      const stopSessionTimer = Effect.fn("SessionService.stopSessionTimer")(
+        function* stopSessionTimerEffect() {
+          const sessionTimer = yield* Ref.get(sessionTimerRef);
+
+          if (sessionTimer === null) {
+            return;
+          }
+
+          yield* Fiber.interrupt(sessionTimer);
+          yield* Ref.set(sessionTimerRef, null);
+        },
+      );
+
+      const emitAlert = Effect.fn("SessionService.emitAlert")(function* emitAlertEffect(
+        session: SessionRecord,
+        metric: SessionLimitMetric,
+        thresholdPercent: number,
+        currentValue: number,
+        limitValue: number,
+      ) {
+        const existingAlerts = yield* Ref.get(activeAlertsRef);
+
+        if (
+          existingAlerts.some(
+            (alert) =>
+              alert.sessionId === session.id &&
+              alert.metric === metric &&
+              alert.thresholdPercent === thresholdPercent,
+          )
+        ) {
+          return;
+        }
+
+        const alert = new SessionAlert({
+          currentValue,
+          limitValue,
+          metric,
+          sessionId: session.id,
+          thresholdPercent,
+        });
+
+        yield* Ref.set(activeAlertsRef, [...existingAlerts, alert]);
+        yield* PubSub.publish(liveAlertsPubSub, alert);
+      });
+
+      const emitThresholdAlerts = Effect.fn("SessionService.emitThresholdAlerts")(
+        function* emitThresholdAlertsEffect(
+          session: SessionRecord,
+          metric: SessionLimitMetric,
+          currentValue: number,
+          limitValue: number | null,
+        ) {
+          if (limitValue === null || limitValue <= 0) {
+            return;
+          }
+
+          const usedPercent = (currentValue / limitValue) * 100;
+
+          for (const thresholdPercent of alertThresholdPercents) {
+            if (usedPercent >= thresholdPercent) {
+              yield* emitAlert(session, metric, thresholdPercent, currentValue, limitValue);
+            }
+          }
+        },
+      );
+
+      const stopMessageListener = Effect.fn("SessionService.stopMessageListener")(
+        function* stopMessageListenerEffect() {
+          const messageListener = yield* Ref.get(messageListenerRef);
+
+          if (messageListener === null) {
+            return;
+          }
+
+          yield* Fiber.interrupt(messageListener);
+          yield* Ref.set(messageListenerRef, null);
+        },
+      );
+
+      const endSession = Effect.fn("SessionService.endSession")(function* endSessionEffect(
+        status: SessionStatus,
+        endReason: SessionEndReason,
+      ) {
+        const activeSession = yield* Ref.get(activeSessionRef);
+
+        if (activeSession === null) {
+          return null;
+        }
+
+        yield* stopActiveScenario();
+        const endedSession = updateSessionRecord(activeSession, {
+          endReason,
+          endedAt: yield* getCurrentTimestamp(),
+          status,
+        });
+
+        yield* sql`UPDATE sessions
+          SET status = ${endedSession.status},
+              ended_at = ${endedSession.endedAt},
+              end_reason = ${endedSession.endReason}
+          WHERE id = ${endedSession.id}`;
+        yield* stopMessageListener();
+        yield* stopSilenceBreaker();
+        yield* stopSessionTimer();
+        yield* interruptTrackedFibers();
+        yield* Ref.set(activeSessionRef, null);
+        yield* Ref.set(activeAlertsRef, []);
+        yield* Ref.set(lastActivityAtRef, null);
+        yield* Ref.set(speakerStatesRef, []);
+
+        return endedSession;
+      });
+
+      const checkTimeLimit = Effect.fn("SessionService.checkTimeLimit")(
+        function* checkTimeLimitEffect() {
+          const activeSession = yield* Ref.get(activeSessionRef);
+
+          if (activeSession === null || activeSession.timeLimitSeconds === null) {
+            return;
+          }
+
+          const elapsedSeconds =
+            (yield* Clock.currentTimeMillis) / 1000 - Date.parse(activeSession.startedAt) / 1000;
+
+          yield* emitThresholdAlerts(
+            activeSession,
+            "time",
+            elapsedSeconds,
+            activeSession.timeLimitSeconds,
+          );
+
+          if (elapsedSeconds >= activeSession.timeLimitSeconds) {
+            yield* endSession(sessionTimedOutStatus, "timeout");
+          }
+        },
+      );
+
+      const startSessionTimer = Effect.fn("SessionService.startSessionTimer")(
+        function* startSessionTimerEffect(session: SessionRecord) {
+          yield* stopSessionTimer();
+
+          if (session.timeLimitSeconds === null) {
+            return;
+          }
+
+          const sessionTimer = yield* Effect.forever(
+            Effect.gen(function* watchSessionTimeEffect() {
+              yield* Effect.sleep(sessionLimitCheckInterval);
+
+              const activeSession = yield* Ref.get(activeSessionRef);
+
+              if (activeSession?.id !== session.id) {
+                return;
+              }
+
+              yield* checkTimeLimit();
+            }),
+          ).pipe(Effect.forkIn(serviceScope));
+
+          yield* Ref.set(sessionTimerRef, sessionTimer);
+          yield* Effect.yieldNow;
         },
       );
 
@@ -314,31 +607,6 @@ export const SessionServiceLive = Layer.effect(
           if (step.delayAfter > 0) {
             yield* Effect.sleep(Duration.seconds(step.delayAfter));
           }
-        },
-      );
-
-      const interruptTrackedFibers = Effect.fn("SessionService.interruptTrackedFibers")(
-        function* interruptTrackedFibersEffect() {
-          const scheduledResponseFibers = yield* Ref.get(scheduledResponseFibersRef);
-
-          for (const fiber of scheduledResponseFibers) {
-            yield* Fiber.interrupt(fiber);
-          }
-
-          yield* Ref.set(scheduledResponseFibersRef, []);
-        },
-      );
-
-      const stopSilenceBreaker = Effect.fn("SessionService.stopSilenceBreaker")(
-        function* stopSilenceBreakerEffect() {
-          const silenceBreaker = yield* Ref.get(silenceBreakerRef);
-
-          if (silenceBreaker === null) {
-            return;
-          }
-
-          yield* Fiber.interrupt(silenceBreaker);
-          yield* Ref.set(silenceBreakerRef, null);
         },
       );
 
@@ -500,27 +768,24 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
-      const stopMessageListener = Effect.fn("SessionService.stopMessageListener")(
-        function* stopMessageListenerEffect() {
-          const messageListener = yield* Ref.get(messageListenerRef);
-
-          if (messageListener === null) {
-            return;
-          }
-
-          yield* Fiber.interrupt(messageListener);
-          yield* Ref.set(messageListenerRef, null);
+      const getActiveAlerts = Effect.fn("SessionService.getActiveAlerts")(
+        function* getActiveAlertsEffect() {
+          return yield* Ref.get(activeAlertsRef);
         },
       );
 
       const getActiveSession = Effect.fn("SessionService.getActiveSession")(
         function* getActiveSessionEffect() {
+          yield* checkTimeLimit();
+
           return yield* Ref.get(activeSessionRef);
         },
       );
 
       const getMostRecentSession = Effect.fn("SessionService.getMostRecentSession")(
         function* getMostRecentSessionEffect() {
+          yield* checkTimeLimit();
+
           const activeSession = yield* Ref.get(activeSessionRef);
 
           if (activeSession !== null) {
@@ -528,10 +793,22 @@ export const SessionServiceLive = Layer.effect(
           }
 
           return yield* selectSessionColumns(
-            sql<SessionRow>`SELECT id, platform, channel, status, started_at, ended_at, end_reason
-            FROM sessions
-            ORDER BY started_at DESC
-            LIMIT 1`,
+            sql<SessionRow>`SELECT
+                id,
+                platform,
+                channel,
+                status,
+                started_at,
+                ended_at,
+                end_reason,
+                total_messages,
+                total_tokens_used,
+                total_cost_usd,
+                time_limit_seconds,
+                cost_limit_usd
+              FROM sessions
+              ORDER BY started_at DESC
+              LIMIT 1`,
           );
         },
       );
@@ -586,7 +863,46 @@ export const SessionServiceLive = Layer.effect(
         return true;
       });
 
-      const startSession = Effect.fn("SessionService.startSession")(function* startSessionEffect() {
+      const recordCost = Effect.fn("SessionService.recordCost")(function* recordCostEffect(
+        tokensUsed: number,
+        costUsd: number,
+      ) {
+        const activeSession = yield* Ref.get(activeSessionRef);
+
+        if (activeSession === null) {
+          return null;
+        }
+
+        const nextSession = updateSessionRecord(activeSession, {
+          totalCostUsd: activeSession.totalCostUsd + costUsd,
+          totalTokensUsed: activeSession.totalTokensUsed + tokensUsed,
+        });
+
+        yield* sql`UPDATE sessions
+          SET total_tokens_used = ${nextSession.totalTokensUsed},
+              total_cost_usd = ${nextSession.totalCostUsd}
+          WHERE id = ${nextSession.id}`;
+        yield* Ref.set(activeSessionRef, nextSession);
+        yield* emitThresholdAlerts(
+          nextSession,
+          "cost",
+          nextSession.totalCostUsd,
+          nextSession.costLimitUsd,
+        );
+
+        if (
+          nextSession.costLimitUsd !== null &&
+          nextSession.totalCostUsd >= nextSession.costLimitUsd
+        ) {
+          return yield* endSession(sessionCostLimitStatus, "cost_limit");
+        }
+
+        return nextSession;
+      });
+
+      const startSession = Effect.fn("SessionService.startSession")(function* startSessionEffect(
+        options?: SessionStartOptions,
+      ) {
         const activeSession = yield* Ref.get(activeSessionRef);
 
         if (activeSession !== null) {
@@ -597,14 +913,21 @@ export const SessionServiceLive = Layer.effect(
           );
         }
 
+        const sessionOptions =
+          options ?? new SessionStartOptions({ costLimitUsd: null, timeLimitSeconds: null });
         const session = new SessionRecord({
           channel: defaultChannel,
+          costLimitUsd: sessionOptions.costLimitUsd,
           endReason: null,
           endedAt: null,
           id: SessionId.makeUnsafe(crypto.randomUUID()),
           platform: mockPlatform,
-          startedAt: new Date().toISOString(),
+          startedAt: yield* getCurrentTimestamp(),
           status: sessionStartedStatus,
+          timeLimitSeconds: sessionOptions.timeLimitSeconds,
+          totalCostUsd: 0,
+          totalMessages: 0,
+          totalTokensUsed: 0,
         });
 
         yield* sql`INSERT INTO sessions (
@@ -629,60 +952,36 @@ export const SessionServiceLive = Layer.effect(
               ${session.startedAt},
               ${session.endedAt},
               ${session.endReason},
-              ${0},
-              ${0},
-              ${0},
-              ${null},
-              ${null}
+              ${session.totalMessages},
+              ${session.totalTokensUsed},
+              ${session.totalCostUsd},
+              ${session.timeLimitSeconds},
+              ${session.costLimitUsd}
             )`;
         yield* Ref.set(activeSessionRef, session);
+        yield* Ref.set(activeAlertsRef, []);
         yield* Ref.set(speakerStatesRef, []);
         yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
         yield* startMessageListener(session);
         yield* startSilenceBreaker(session);
+        yield* startSessionTimer(session);
 
         return session;
       });
 
       const stopSession = Effect.fn("SessionService.stopSession")(function* stopSessionEffect() {
-        const activeSession = yield* Ref.get(activeSessionRef);
-
-        if (activeSession === null) {
-          return null;
-        }
-
-        yield* stopActiveScenario();
-        const endedSession = new SessionRecord({
-          channel: activeSession.channel,
-          endReason: manualEndReason,
-          endedAt: new Date().toISOString(),
-          id: activeSession.id,
-          platform: activeSession.platform,
-          startedAt: activeSession.startedAt,
-          status: sessionEndedStatus,
-        });
-
-        yield* sql`UPDATE sessions
-          SET status = ${endedSession.status},
-              ended_at = ${endedSession.endedAt},
-              end_reason = ${endedSession.endReason}
-          WHERE id = ${endedSession.id}`;
-        yield* stopMessageListener();
-        yield* stopSilenceBreaker();
-        yield* interruptTrackedFibers();
-        yield* Ref.set(activeSessionRef, null);
-        yield* Ref.set(lastActivityAtRef, null);
-        yield* Ref.set(speakerStatesRef, []);
-
-        return endedSession;
+        return yield* endSession(sessionEndedStatus, manualEndReason);
       });
 
       return {
         service: SessionService.of({
+          getActiveAlerts,
           getActiveSession,
           getSessionMessages,
           getMostRecentSession,
+          liveAlerts: Stream.fromPubSub(liveAlertsPubSub),
           liveMessages: Stream.fromPubSub(liveMessagesPubSub),
+          recordCost,
           runScenario,
           startSession,
           stopSession,

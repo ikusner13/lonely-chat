@@ -34,7 +34,7 @@ import {
 import { ScenarioService } from "../scenarios/Services/scenario-service";
 import type { BotConnection } from "../platforms/Services/platform-adapter";
 import { SessionServiceLive } from "./Layers/session-service";
-import { SessionService } from "./Services/session-service";
+import { SessionService, SessionStartOptions } from "./Services/session-service";
 
 interface StoredSessionRow {
   readonly channel: string;
@@ -53,6 +53,15 @@ interface StoredSessionMessageRow {
   readonly platform: string;
   readonly session_id: string;
   readonly username: string;
+}
+
+interface StoredSessionLimitRow {
+  readonly cost_limit_usd: number | null;
+  readonly end_reason: string | null;
+  readonly status: string;
+  readonly time_limit_seconds: number | null;
+  readonly total_cost_usd: number;
+  readonly total_tokens_used: number;
 }
 
 const mockBot: BotConnection = {
@@ -180,6 +189,26 @@ const loadStoredSessionMessages = (
       return yield* sql<StoredSessionMessageRow>`SELECT session_id, bot_id, username, content, platform, is_bot
         FROM session_messages
         ORDER BY sent_at ASC, rowid ASC`;
+    }),
+  );
+
+const loadStoredSessionLimits = (
+  dbPath: string,
+): Effect.Effect<readonly StoredSessionLimitRow[], unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* queryStoredSessionLimits() {
+      const sql = yield* SqlClient.SqlClient;
+
+      return yield* sql<StoredSessionLimitRow>`SELECT
+          status,
+          end_reason,
+          total_tokens_used,
+          total_cost_usd,
+          time_limit_seconds,
+          cost_limit_usd
+        FROM sessions
+        ORDER BY started_at ASC`;
     }),
   );
 
@@ -813,6 +842,109 @@ describe("session service", () => {
         );
         expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(1);
       }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("emits cost alerts at the 50, 75, and 90 percent thresholds", () =>
+    Effect.gen(function* emitsCostAlertsAtTheConfiguredThresholds() {
+      const dbPath = yield* createDatabasePath;
+      const sessionLayer = makeSessionTestLayer(dbPath, MockPlatformAdapterLive);
+
+      const alerts = yield* Effect.gen(function* exerciseCostAlerts() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession(
+          new SessionStartOptions({
+            costLimitUsd: 1,
+            timeLimitSeconds: null,
+          }),
+        );
+
+        const alertsFiber = yield* sessionService.liveAlerts.pipe(
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* Effect.yieldNow;
+        yield* sessionService.recordCost(100, 0.5);
+        yield* sessionService.recordCost(50, 0.25);
+        yield* sessionService.recordCost(25, 0.15);
+
+        return [...(yield* Fiber.join(alertsFiber))];
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(alerts.map((alert) => [alert.metric, alert.thresholdPercent])).toEqual([
+        ["cost", 50],
+        ["cost", 75],
+        ["cost", 90],
+      ]);
+    }),
+  );
+
+  it.effect("ends the session automatically when the time limit is crossed", () =>
+    Effect.gen(function* endsTheSessionAutomaticallyWhenTheTimeLimitIsCrossed() {
+      const dbPath = yield* createDatabasePath;
+      const sessionLayer = makeSessionTestLayer(dbPath, MockPlatformAdapterLive);
+
+      yield* Effect.gen(function* exerciseTimeoutLimit() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession(
+          new SessionStartOptions({
+            costLimitUsd: null,
+            timeLimitSeconds: 4,
+          }),
+        );
+
+        yield* TestClock.adjust("4 seconds");
+        yield* Effect.yieldNow;
+
+        expect(yield* sessionService.getActiveSession()).toBeNull();
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(yield* loadStoredSessionLimits(dbPath)).toEqual([
+        {
+          cost_limit_usd: null,
+          end_reason: "timeout",
+          status: "timeout",
+          time_limit_seconds: 4,
+          total_cost_usd: 0,
+          total_tokens_used: 0,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("ends the session automatically when the cost limit is crossed", () =>
+    Effect.gen(function* endsTheSessionAutomaticallyWhenTheCostLimitIsCrossed() {
+      const dbPath = yield* createDatabasePath;
+      const sessionLayer = makeSessionTestLayer(dbPath, MockPlatformAdapterLive);
+
+      yield* Effect.gen(function* exerciseCostLimit() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession(
+          new SessionStartOptions({
+            costLimitUsd: 1,
+            timeLimitSeconds: null,
+          }),
+        );
+        yield* sessionService.recordCost(120, 1.05);
+
+        expect(yield* sessionService.getActiveSession()).toBeNull();
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(yield* loadStoredSessionLimits(dbPath)).toEqual([
+        {
+          cost_limit_usd: 1,
+          end_reason: "cost_limit",
+          status: "cost_limit",
+          time_limit_seconds: null,
+          total_cost_usd: 1.05,
+          total_tokens_used: 120,
+        },
+      ]);
     }),
   );
 });
