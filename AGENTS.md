@@ -6,7 +6,7 @@
 
 - **Effect v4** (4.0.0-beta.43)
 - **Vite+** toolchain (oxlint + oxfmt), all lint categories enabled, type-aware
-- **pnpm** package manager
+- **pnpm** package manager; do not generate or commit `bun.lock`
 
 ## Commands
 
