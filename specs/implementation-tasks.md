@@ -113,7 +113,7 @@ Use it with:
 - Spec inputs: `specs/scenarios.md`, `specs/data.md`, `specs/ui.md`
 - Verify: scenario repository tests, scenario UI tests, `vp check`, targeted `vp test`
 
-### [ ] VS-11: Run manual scripted scenarios
+### [x] VS-11: Run manual scripted scenarios
 
 - Depends on: `VS-10`, `VS-05`, `VS-07`
 - Outcome: During an active session, a manual scenario runs its steps in order and injected messages appear in chat and persistence.

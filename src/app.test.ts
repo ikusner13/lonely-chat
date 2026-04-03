@@ -89,11 +89,15 @@ const createTestRuntimeWithMockPlatform = (dbPath: string) =>
       );
       const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
       const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
+      const sessionServiceDependencies = Layer.mergeAll(
+        FakeAiClientLive,
+        botServiceLayer,
+        databaseLayer,
+        platformLayer,
+        scenarioServiceLayer,
+      );
       const sessionServiceLayer = SessionServiceLive.pipe(
-        Layer.provide(platformLayer),
-        Layer.provide(FakeAiClientLive),
-        Layer.provide(botServiceLayer),
-        Layer.provide(databaseLayer),
+        Layer.provide(sessionServiceDependencies),
       );
       const runtime = ManagedRuntime.make(
         Layer.mergeAll(
@@ -813,6 +817,69 @@ describe("app shell", () => {
       body = yield* fromPromise(response.text());
 
       expect(body).toContain("No scenarios configured yet.");
+    }),
+  );
+
+  it.effect("runs a manual scenario from the scenarios page during an active session", () =>
+    Effect.gen(function* runsAManualScenarioFromTheScenariosPageDuringAnActiveSession() {
+      const dbPath = yield* createDatabasePath;
+      const { runtime } = yield* createTestRuntimeWithMockPlatform(dbPath);
+      const app = createApp(runtime);
+      const pixel = makeTestBot();
+
+      yield* fromPromise(createStoredBot(runtime, pixel));
+
+      let response = yield* requestScenarioForm(
+        app,
+        "http://localhost/scenarios",
+        makeValidScenarioFormValues({
+          participants: [pixel.id],
+          steps: JSON.stringify([
+            {
+              action: "say",
+              botId: pixel.id,
+              content: "scripted hello from scenario",
+              delayAfter: 0,
+            },
+          ]),
+          triggerDelaySeconds: "",
+          triggerType: "manual",
+        }),
+      );
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      const [storedScenario] = yield* Effect.promise(() =>
+        runtime.runPromise(
+          ScenarioService.use((scenarioService) => scenarioService.listScenarios()),
+        ),
+      );
+      const scenarioId = storedScenario?.id ?? "";
+
+      expect(scenarioId).not.toBe("");
+
+      response = yield* requestApp(app, "http://localhost/session/start", {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      response = yield* requestApp(app, "http://localhost/scenarios");
+      let body = yield* fromPromise(response.text());
+
+      expect(body).toContain("Session status: active on lonely-chat");
+      expect(body).toContain("Run Scenario");
+
+      response = yield* requestApp(app, `http://localhost/scenarios/${scenarioId}/run`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      body = yield* waitForChatViewerMessage(app, "scripted hello from scenario");
+
+      expect(body).toContain("scripted hello from scenario");
+      expect(body).toContain("pixel_bot");
     }),
   );
 

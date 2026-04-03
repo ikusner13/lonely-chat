@@ -13,12 +13,14 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import type { AiGenerationError } from "../../ai/ai-generation-error";
 import { AiClient } from "../../ai/Services/ai-client";
+import type { BotRecord } from "../../bots/bot-record";
 import { BotService } from "../../bots/Services/bot-service";
 import {
   advanceSpeakerState,
   calculateResponseDelay,
   isEligibleSpeaker,
   makeMentionResponseRequest,
+  makeScenarioResponseRequest,
   makeSilenceBreakerRequest,
   selectSilenceBreaker,
   selectSpeakers,
@@ -35,6 +37,8 @@ import type {
   PlatformConnectionError,
   PlatformSendError,
 } from "../../platforms/Services/platform-adapter";
+import type { ScenarioId, ScenarioRecord, ScenarioStep } from "../../scenarios/scenario-record";
+import { ScenarioService } from "../../scenarios/Services/scenario-service";
 import { SessionService, SessionId } from "../Services/session-service";
 import type {
   SessionEndReason,
@@ -81,6 +85,11 @@ type MessageListenerFiber = Fiber.Fiber<
   AiGenerationError | PlatformConnectionError | PlatformSendError | SqlError
 >;
 type SessionTaskFiber = Fiber.Fiber<void, unknown>;
+
+interface ExecutableScenarioStep {
+  readonly bot: BotRecord | null;
+  readonly step: ScenarioStep;
+}
 
 const makeSessionRecord = (row: SessionRow): SessionRecord =>
   new SessionRecord({
@@ -144,6 +153,7 @@ export const SessionServiceLive = Layer.effect(
     Effect.gen(function* makeSessionService() {
       const aiClient = yield* AiClient;
       const botService = yield* BotService;
+      const scenarioService = yield* ScenarioService;
       const sql = yield* SqlClient.SqlClient;
       const platformAdapter = yield* PlatformAdapter;
       const serviceScope = yield* Scope.make();
@@ -160,6 +170,7 @@ export const SessionServiceLive = Layer.effect(
         ),
       );
       const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
+      const scenarioFiberRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const scheduledResponseFibersRef = yield* Ref.make<readonly SessionTaskFiber[]>([]);
       const silenceBreakerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
@@ -220,6 +231,89 @@ export const SessionServiceLive = Layer.effect(
             ORDER BY sent_at ASC, rowid ASC`;
 
           return rows.map(makeStoredSessionMessageRecord);
+        },
+      );
+
+      const stopActiveScenario = Effect.fn("SessionService.stopActiveScenario")(
+        function* stopActiveScenarioEffect() {
+          const scenarioFiber = yield* Ref.get(scenarioFiberRef);
+
+          if (scenarioFiber === null) {
+            return;
+          }
+
+          yield* Fiber.interrupt(scenarioFiber);
+          yield* Ref.set(scenarioFiberRef, null);
+        },
+      );
+
+      const sendScenarioMessage = Effect.fn("SessionService.sendScenarioMessage")(
+        function* sendScenarioMessageEffect(session: SessionRecord, bot: BotRecord, text: string) {
+          const speakerConnection = {
+            botId: PlatformBotId.makeUnsafe(bot.id),
+            channel: session.channel,
+            platform: session.platform,
+            username: ChatUsername.makeUnsafe(bot.name),
+          } as const;
+
+          yield* platformAdapter.connect(speakerConnection);
+          yield* platformAdapter.sendMessage(speakerConnection, text);
+          yield* Ref.set(
+            speakerStatesRef,
+            advanceSpeakerState(
+              yield* Ref.get(speakerStatesRef),
+              speakerConnection.botId,
+              yield* Clock.currentTimeMillis,
+            ),
+          );
+        },
+      );
+
+      const runScenarioStep = Effect.fn("SessionService.runScenarioStep")(
+        function* runScenarioStepEffect(
+          session: SessionRecord,
+          scenario: ScenarioRecord,
+          executableStep: ExecutableScenarioStep,
+        ) {
+          const activeSession = yield* Ref.get(activeSessionRef);
+
+          if (activeSession?.id !== session.id) {
+            return;
+          }
+
+          const { bot, step } = executableStep;
+
+          switch (step.action) {
+            case "wait": {
+              yield* Effect.sleep(Duration.seconds(step.delayAfter));
+              return;
+            }
+            case "say": {
+              if (bot !== null && step.content !== null) {
+                yield* sendScenarioMessage(session, bot, step.content);
+              }
+
+              break;
+            }
+            case "respond": {
+              if (bot !== null) {
+                const response = yield* aiClient.generateText(
+                  makeScenarioResponseRequest(bot, session.platform, scenario.topic, step.content),
+                );
+
+                yield* sendScenarioMessage(session, bot, response.text);
+              }
+
+              break;
+            }
+            default: {
+              return;
+            }
+          }
+
+          if (step.delayAfter > 0) {
+            yield* Effect.sleep(Duration.seconds(step.delayAfter));
+          }
         },
       );
 
@@ -442,6 +536,56 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const buildExecutableScenarioSteps = Effect.fn("SessionService.buildExecutableScenarioSteps")(
+        function* buildExecutableScenarioStepsEffect(scenario: ScenarioRecord) {
+          const executableSteps: ExecutableScenarioStep[] = [];
+
+          for (const step of scenario.steps) {
+            executableSteps.push({
+              bot: step.action === "wait" ? null : yield* botService.getBot(step.botId),
+              step,
+            });
+          }
+
+          return executableSteps;
+        },
+      );
+
+      const runScenario = Effect.fn("SessionService.runScenario")(function* runScenarioEffect(
+        scenarioId: ScenarioId,
+      ) {
+        const activeSession = yield* Ref.get(activeSessionRef);
+
+        if (activeSession === null) {
+          return false;
+        }
+
+        const scenario = yield* scenarioService.getScenario(scenarioId);
+
+        if (scenario === null || !scenario.enabled || scenario.triggerType !== "manual") {
+          return false;
+        }
+
+        const executableSteps = yield* buildExecutableScenarioSteps(scenario);
+
+        yield* stopActiveScenario();
+
+        const scenarioFiber = yield* Effect.gen(function* runScenarioStepsEffect() {
+          for (const step of executableSteps) {
+            yield* runScenarioStep(activeSession, scenario, step);
+          }
+        }).pipe(
+          Effect.ensuring(Ref.set(scenarioFiberRef, null)),
+          Effect.asVoid,
+          Effect.forkIn(serviceScope),
+        );
+
+        yield* Ref.set(scenarioFiberRef, scenarioFiber);
+        yield* Effect.yieldNow;
+
+        return true;
+      });
+
       const startSession = Effect.fn("SessionService.startSession")(function* startSessionEffect() {
         const activeSession = yield* Ref.get(activeSessionRef);
 
@@ -507,6 +651,7 @@ export const SessionServiceLive = Layer.effect(
           return null;
         }
 
+        yield* stopActiveScenario();
         const endedSession = new SessionRecord({
           channel: activeSession.channel,
           endReason: manualEndReason,
@@ -538,6 +683,7 @@ export const SessionServiceLive = Layer.effect(
           getSessionMessages,
           getMostRecentSession,
           liveMessages: Stream.fromPubSub(liveMessagesPubSub),
+          runScenario,
           startSession,
           stopSession,
         } satisfies SessionServiceShape),

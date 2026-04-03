@@ -377,3 +377,26 @@ export const makeSilenceBreakerRequest = (
   ],
   model: AiModelName.makeUnsafe(bot.model),
 });
+
+export const makeScenarioResponseRequest = (
+  bot: BotRecord,
+  platform: PlatformName,
+  topic: string,
+  hint: string | null,
+): AiGenerateRequest => ({
+  botName: BotName.makeUnsafe(bot.displayName),
+  messages: [
+    {
+      content: buildSystemPrompt(bot, platform),
+      role: "system",
+    },
+    ...buildExampleMessages(bot),
+    {
+      content: [`Scenario topic: ${topic}`, hint === null ? null : `Step hint: ${hint}`]
+        .filter((line): line is string => line !== null)
+        .join("\n"),
+      role: "user",
+    },
+  ],
+  model: AiModelName.makeUnsafe(bot.model),
+});

@@ -514,6 +514,7 @@ const renderScenarioEditorForm = (
 const renderScenarioList = (
   scenarios: readonly ScenarioRecord[],
   bots: readonly BotRecord[],
+  activeSession: SessionRecord | null,
   editForms: ReadonlyMap<string, ScenarioFormState>,
 ): string => {
   if (scenarios.length === 0) {
@@ -526,6 +527,16 @@ const renderScenarioList = (
           const editFormState =
             editForms.get(scenario.id) ??
             makeScenarioFormState(makeScenarioEditorFormValues(scenario));
+          let runScenarioMarkup = "";
+
+          if (scenario.enabled && scenario.triggerType === "manual") {
+            runScenarioMarkup =
+              activeSession === null
+                ? "<p>Start a session to run this scenario.</p>"
+                : `<form action="/scenarios/${scenario.id}/run" method="post">
+                     <button type="submit">Run Scenario</button>
+                   </form>`;
+          }
 
           return `<li>
             <strong>${escapeHtml(scenario.name)}</strong><br />
@@ -535,6 +546,7 @@ const renderScenarioList = (
             Trigger: ${escapeHtml(scenario.triggerType)}<br />
             Duration: ${scenario.durationSeconds ?? "none"}<br />
             Enabled: ${scenario.enabled ? "yes" : "no"}
+            ${runScenarioMarkup}
             <details>
               <summary>Edit scenario</summary>
               ${renderScenarioEditorForm(`/scenarios/${scenario.id}`, "Save Scenario", editFormState, bots)}
@@ -551,6 +563,7 @@ const renderScenarioList = (
 const renderScenarioManagerDocument = (
   scenarios: readonly ScenarioRecord[],
   bots: readonly BotRecord[],
+  activeSession: SessionRecord | null,
   createForm: ScenarioFormState,
   editForms: ReadonlyMap<string, ScenarioFormState>,
 ): string => `<!doctype html>
@@ -569,13 +582,14 @@ const renderScenarioManagerDocument = (
         <a href="/chat">Chat Viewer</a>
         <a href="/bots">Bot Manager</a>
       </nav>
+      <p>Session status: ${activeSession === null ? "idle" : `active on ${activeSession.channel}`}</p>
       <section>
         <h2>Create Scenario</h2>
         ${renderScenarioEditorForm("/scenarios", "Create Scenario", createForm, bots)}
       </section>
       <section>
         <h2>Scenario List</h2>
-        ${renderScenarioList(scenarios, bots, editForms)}
+        ${renderScenarioList(scenarios, bots, activeSession, editForms)}
       </section>
     </main>
   </body>
@@ -854,12 +868,14 @@ export const makeAppRuntime = (
   const databaseLayer = makeDatabaseLayer(dbPath);
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
   const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
-  const sessionServiceLayer = SessionServiceLive.pipe(
-    Layer.provide(MockPlatformAdapterLive),
-    Layer.provide(FakeAiClientLive),
-    Layer.provide(botServiceLayer),
-    Layer.provide(databaseLayer),
+  const sessionServiceDependencies = Layer.mergeAll(
+    databaseLayer,
+    FakeAiClientLive,
+    MockPlatformAdapterLive,
+    botServiceLayer,
+    scenarioServiceLayer,
   );
+  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionServiceDependencies));
 
   return ManagedRuntime.make(
     Layer.mergeAll(FakeAiClientLive, botServiceLayer, scenarioServiceLayer, sessionServiceLayer),
@@ -960,15 +976,17 @@ export const createApp = (
   });
 
   app.get("/scenarios", async (context) => {
-    const [bots, scenarios] = await Promise.all([
+    const [bots, scenarios, activeSession] = await Promise.all([
       runtime.runPromise(loadBots()),
       runtime.runPromise(loadScenarios()),
+      runtime.runPromise(SessionService.use((sessionService) => sessionService.getActiveSession())),
     ]);
 
     return context.html(
       renderScenarioManagerDocument(
         scenarios,
         bots,
+        activeSession,
         makeScenarioFormState(makeEmptyScenarioEditorFormValues()),
         new Map(),
       ),
@@ -1116,9 +1134,10 @@ export const createApp = (
   app.post("/scenarios", async (context) => {
     const formValues = readScenarioFormValues(await context.req.formData());
     const parsedForm = parseScenarioEditorFields(formValues);
-    const [bots, scenarios] = await Promise.all([
+    const [bots, scenarios, activeSession] = await Promise.all([
       runtime.runPromise(loadBots()),
       runtime.runPromise(loadScenarios()),
+      runtime.runPromise(SessionService.use((sessionService) => sessionService.getActiveSession())),
     ]);
 
     if (parsedForm.editorFields === null) {
@@ -1126,6 +1145,7 @@ export const createApp = (
         renderScenarioManagerDocument(
           scenarios,
           bots,
+          activeSession,
           makeScenarioFormState(parsedForm.values, parsedForm.errors),
           new Map(),
         ),
@@ -1154,9 +1174,10 @@ export const createApp = (
 
     const formValues = readScenarioFormValues(await context.req.formData());
     const parsedForm = parseScenarioEditorFields(formValues);
-    const [bots, scenarios] = await Promise.all([
+    const [bots, scenarios, activeSession] = await Promise.all([
       runtime.runPromise(loadBots()),
       runtime.runPromise(loadScenarios()),
+      runtime.runPromise(SessionService.use((sessionService) => sessionService.getActiveSession())),
     ]);
 
     if (parsedForm.editorFields === null) {
@@ -1168,6 +1189,7 @@ export const createApp = (
         renderScenarioManagerDocument(
           scenarios,
           bots,
+          activeSession,
           makeScenarioFormState(makeEmptyScenarioEditorFormValues()),
           editForms,
         ),
@@ -1195,6 +1217,16 @@ export const createApp = (
 
     await runtime.runPromise(
       ScenarioService.use((scenarioService) => scenarioService.deleteScenario(scenarioId)),
+    );
+
+    return context.redirect("/scenarios", redirectSeeOtherStatus);
+  });
+
+  app.post("/scenarios/:scenarioId/run", async (context) => {
+    const scenarioId = ScenarioId.makeUnsafe(context.req.param("scenarioId"));
+
+    await runtime.runPromise(
+      SessionService.use((sessionService) => sessionService.runScenario(scenarioId)),
     );
 
     return context.redirect("/scenarios", redirectSeeOtherStatus);

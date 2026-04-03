@@ -24,6 +24,14 @@ import {
   ChatUsername,
   PlatformAdapter,
 } from "../platforms/Services/platform-adapter";
+import { ScenarioServiceLive } from "../scenarios/Layers/scenario-service";
+import {
+  ScenarioId,
+  ScenarioRecord,
+  ScenarioStep,
+  ScenarioTriggerConfig,
+} from "../scenarios/scenario-record";
+import { ScenarioService } from "../scenarios/Services/scenario-service";
 import type { BotConnection } from "../platforms/Services/platform-adapter";
 import { SessionServiceLive } from "./Layers/session-service";
 import { SessionService } from "./Services/session-service";
@@ -88,6 +96,45 @@ const makeBotConnection = (bot: BotRecord): BotConnection => ({
   platform: "mock",
   username: ChatUsername.makeUnsafe(bot.name),
 });
+
+const makeManualScenario = (overrides?: Partial<ScenarioRecord>): ScenarioRecord =>
+  new ScenarioRecord({
+    createdAt: "2026-04-03T00:00:00.000Z",
+    description: "Drive a manual merch promotion beat.",
+    durationSeconds: 30,
+    enabled: true,
+    id: ScenarioId.makeUnsafe("scenario-manual-merch"),
+    name: "Manual Merch Push",
+    participants: [PersistedBotId.makeUnsafe("bot-1")],
+    steps: [
+      new ScenarioStep({
+        action: "say",
+        botId: PersistedBotId.makeUnsafe("bot-1"),
+        content: "check out the merch",
+        delayAfter: 3,
+      }),
+      new ScenarioStep({
+        action: "wait",
+        botId: PersistedBotId.makeUnsafe("bot-1"),
+        content: null,
+        delayAfter: 2,
+      }),
+      new ScenarioStep({
+        action: "respond",
+        botId: PersistedBotId.makeUnsafe("bot-1"),
+        content: "react to the merch drop naturally",
+        delayAfter: 0,
+      }),
+    ],
+    topic: "new merch drop",
+    triggerConfig: new ScenarioTriggerConfig({
+      delaySeconds: null,
+      eventType: null,
+    }),
+    triggerType: "manual",
+    updatedAt: "2026-04-03T00:00:00.000Z",
+    ...overrides,
+  });
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -216,14 +263,17 @@ const makeSessionTestLayer = (
 ) => {
   const databaseLayer = makeDatabaseLayer(dbPath);
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
-  const sessionServiceLayer = SessionServiceLive.pipe(
-    Layer.provide(platformLayer),
-    Layer.provide(aiLayer),
-    Layer.provide(botServiceLayer),
-    Layer.provide(databaseLayer),
+  const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
+  const sessionDependencies = Layer.mergeAll(
+    aiLayer,
+    botServiceLayer,
+    databaseLayer,
+    platformLayer,
+    scenarioServiceLayer,
   );
+  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionDependencies));
 
-  return Layer.mergeAll(aiLayer, botServiceLayer, sessionServiceLayer);
+  return Layer.mergeAll(aiLayer, botServiceLayer, scenarioServiceLayer, sessionServiceLayer);
 };
 
 describe("session service", () => {
@@ -618,6 +668,102 @@ describe("session service", () => {
         expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
         expect(yield* fakeAiClient.getRequests).toHaveLength(1);
       }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("runs manual scenario say, wait, and respond steps in order", () =>
+    Effect.gen(function* runsManualScenarioSayWaitAndRespondStepsInOrder() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, makeStoredBot());
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+      const scenario = makeManualScenario();
+
+      const session = yield* Effect.gen(function* exerciseManualScenarioRunner() {
+        const scenarioService = yield* ScenarioService;
+        const sessionService = yield* SessionService;
+
+        yield* scenarioService.createScenario(scenario);
+
+        const startedSession = yield* sessionService.startSession();
+
+        expect(yield* sessionService.runScenario(scenario.id)).toBe(true);
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(0);
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
+          {
+            botId: mockBot.botId,
+            channel: mockBot.channel,
+            direction: "outgoing",
+            platform: "mock",
+            text: "check out the merch",
+            username: ChatUsername.makeUnsafe("pixel"),
+          },
+        ]);
+
+        yield* TestClock.adjust("3 seconds");
+
+        expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(1);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(0);
+
+        yield* TestClock.adjust("2 seconds");
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+        const [scenarioRequest] = yield* fakeAiClient.getRequests;
+
+        expect(scenarioRequest).toBeDefined();
+        expect(scenarioRequest?.botName).toBe("Pixel");
+        expect(scenarioRequest?.messages).toContainEqual({
+          content: "Scenario topic: new merch drop\nStep hint: react to the merch drop naturally",
+          role: "user",
+        });
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
+          {
+            botId: mockBot.botId,
+            channel: mockBot.channel,
+            direction: "outgoing",
+            platform: "mock",
+            text: "check out the merch",
+            username: ChatUsername.makeUnsafe("pixel"),
+          },
+          {
+            botId: mockBot.botId,
+            channel: mockBot.channel,
+            direction: "outgoing",
+            platform: "mock",
+            text: "Pixel: [fake:openrouter/mock-model] Scenario topic: new merch drop Step hint: react to the merch drop naturally",
+            username: ChatUsername.makeUnsafe("pixel"),
+          },
+        ]);
+
+        return startedSession;
+      }).pipe(Effect.provide(appLayer));
+
+      expect(yield* loadStoredSessionMessages(dbPath)).toEqual([
+        {
+          bot_id: mockBot.botId,
+          content: "check out the merch",
+          is_bot: 1,
+          platform: "mock",
+          session_id: session.id,
+          username: "pixel",
+        },
+        {
+          bot_id: mockBot.botId,
+          content:
+            "Pixel: [fake:openrouter/mock-model] Scenario topic: new merch drop Step hint: react to the merch drop naturally",
+          is_bot: 1,
+          platform: "mock",
+          session_id: session.id,
+          username: "pixel",
+        },
+      ]);
     }),
   );
 
