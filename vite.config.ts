@@ -35,6 +35,7 @@ export default defineConfig({
       // `promise-function-async` otherwise.
       "no-async-await": "off",
       "no-await-in-loop": "off",
+      "max-classes-per-file": "off",
       "max-lines-per-function": "off",
       "no-implicit-coercion": "off",
       "no-magic-numbers": "off",

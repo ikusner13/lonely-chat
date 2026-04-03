@@ -8,7 +8,9 @@ import { tmpdir } from "node:os";
 
 const channelSettingKey = "channel";
 const createSettingsMigrationId = 1;
+const createSessionsMigrationId = 2;
 const createSettingsMigrationName = "create_settings";
+const createSessionsMigrationName = "create_sessions";
 const updatedAt = "2026-04-02T00:00:00.000Z";
 
 interface TableRow {
@@ -56,7 +58,7 @@ const loadMigratedTables = (dbPath: string): Effect.Effect<readonly TableRow[], 
       return yield* sql<TableRow>`SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name IN ('settings', 'effect_sql_migrations')
+          AND name IN ('settings', 'sessions', 'effect_sql_migrations')
         ORDER BY name`;
     }),
   );
@@ -107,11 +109,19 @@ describe("database runtime", () => {
       const tables = yield* loadMigratedTables(dbPath);
       const migrations = yield* loadExecutedMigrations(dbPath);
 
-      expect(tables).toEqual([{ name: "effect_sql_migrations" }, { name: "settings" }]);
+      expect(tables).toEqual([
+        { name: "effect_sql_migrations" },
+        { name: "sessions" },
+        { name: "settings" },
+      ]);
       expect(migrations).toEqual([
         {
           migration_id: createSettingsMigrationId,
           name: createSettingsMigrationName,
+        },
+        {
+          migration_id: createSessionsMigrationId,
+          name: createSessionsMigrationName,
         },
       ]);
     }),

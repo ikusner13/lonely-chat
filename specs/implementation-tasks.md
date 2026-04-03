@@ -30,7 +30,7 @@ Use it with:
 - Spec inputs: `specs/platforms.md`, `specs/technical-effect.md`, `specs/technical-ai.md`
 - Verify: mock adapter tests, fake AI tests, `vp check`, targeted `vp test`
 
-### [ ] TB-04: Start and stop a mock session from the dashboard
+### [x] TB-04: Start and stop a mock session from the dashboard
 
 - Depends on: `TB-02`, `TB-03`
 - Outcome: A user clicks Start Session, sees active status on the dashboard, then clicks Stop Session and sees the session end cleanly.

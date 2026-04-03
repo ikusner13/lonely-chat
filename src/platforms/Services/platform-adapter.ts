@@ -1,8 +1,11 @@
 import type { Effect, Stream } from "effect";
 import { Schema, ServiceMap } from "effect";
 
-export type PlatformName = "mock" | "twitch" | "kick";
-export type ChatMessageDirection = "incoming" | "outgoing";
+export const PlatformName = Schema.Literals(["mock", "twitch", "kick"]);
+export type PlatformName = typeof PlatformName.Type;
+
+export const ChatMessageDirection = Schema.Literals(["incoming", "outgoing"]);
+export type ChatMessageDirection = typeof ChatMessageDirection.Type;
 
 export const BotId = Schema.String.pipe(Schema.brand("BotId"));
 export type BotId = typeof BotId.Type;

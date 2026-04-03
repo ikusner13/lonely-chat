@@ -28,3 +28,5 @@ Do not add:
 - Use `vp run test`, not `vp test`, when a slice relies on the repo's own Bun-runtime Vitest command. `vp test` uses the Vite+ test runner path, while `vp run test` respects the package script `bun ./node_modules/vitest/vitest.mjs run`.
 - For Effect services in this repo, keep the `ServiceMap.Service` contract in `Services/<name>.ts` and the live/test implementation in `Layers/<name>.ts`; that satisfies the one-class-per-file lint rule and avoids falling back to structural error objects.
 - This repo should target `esnext` in `tsconfig.json` so Effect code can use modern built-ins like `toReversed()` without extra compatibility workarounds.
+- When Hono handlers need Effect services, create one shared `ManagedRuntime` for the app and pass that same runtime into `createApp`; otherwise request handling and shutdown can accidentally use different service instances.
+- Prefer `Schema` for domain modeling wherever practical: use branded schema types for meaningful primitives and `Schema.Class` / literal schemas for persisted or cross-service records instead of plain TypeScript-only interfaces and string unions.
