@@ -116,10 +116,12 @@ const readStringProperty = (value: Record<string, unknown>, key: string): string
   return typeof property === "string" ? property : null;
 };
 
+const readWebRequestJson = (request: Request): Promise<unknown> => request.json();
+
 const readRecordedRequest = (request: HttpClientRequestType): Effect.Effect<RecordedRequest> =>
   Effect.gen(function* readRecordedRequestEffect() {
     const webRequest = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
-    const body = yield* Effect.promise(() => webRequest.json()).pipe(Effect.orDie);
+    const body = yield* Effect.promise(() => readWebRequestJson(webRequest)).pipe(Effect.orDie);
 
     if (!isRecord(body)) {
       return yield* Effect.die(new Error("Expected JSON object request body."));

@@ -25,7 +25,7 @@ Do not add:
 
 - The repo lint config disables the conflicting `require-await` and `promise-function-async` rules in `vite.config.ts`; use the clearest Promise/Effect style for tests and local helpers instead of contorting code around those rules.
 - A slice is not complete until its checkbox is updated in `specs/implementation-tasks.md`.
-- Use `vp run test`, not `vp test`, when a slice relies on the repo's own Bun-runtime Vitest command. `vp test` uses the Vite+ test runner path, while `vp run test` respects the package script `bun ./node_modules/vitest/vitest.mjs run`.
+- Use `vp run test`, not `vp test`, when a slice relies on the repo's own package-script Vitest command. `vp test` uses the Vite+ test runner path, while `vp run test` respects the package script `node ./node_modules/vitest/vitest.mjs run`, which matters because the shared SQLite tests use `better-sqlite3` and do not run under Bun.
 - For Effect services in this repo, keep the `ServiceMap.Service` contract in `Services/<name>.ts` and the live/test implementation in `Layers/<name>.ts`; that satisfies the one-class-per-file lint rule and avoids falling back to structural error objects.
 - This repo should target `esnext` in `tsconfig.json` so Effect code can use modern built-ins like `toReversed()` without extra compatibility workarounds.
 - When Hono handlers need Effect services, create one shared `ManagedRuntime` for the app and pass that same runtime into `createApp`; otherwise request handling and shutdown can accidentally use different service instances.
