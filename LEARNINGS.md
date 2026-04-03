@@ -30,3 +30,4 @@ Do not add:
 - This repo should target `esnext` in `tsconfig.json` so Effect code can use modern built-ins like `toReversed()` without extra compatibility workarounds.
 - When Hono handlers need Effect services, create one shared `ManagedRuntime` for the app and pass that same runtime into `createApp`; otherwise request handling and shutdown can accidentally use different service instances.
 - Prefer `Schema` for domain modeling wherever practical: use branded schema types for meaningful primitives and `Schema.Class` / literal schemas for persisted or cross-service records instead of plain TypeScript-only interfaces and string unions.
+- For promise-returning local helpers, prefer named `const foo = async function foo(...) { const result = await ...; return result; };` expressions. That shape satisfies this repo's combined `func-style`, `func-names`, `promise-function-async`, and `require-await` lint rules without fighting `arrow-body-style`.

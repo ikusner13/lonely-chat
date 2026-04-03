@@ -39,7 +39,7 @@ Use it with:
 
 ## Track 1: Bot Configuration Vertical Slices
 
-### [ ] VS-01: Persist bot records and list them in the UI
+### [x] VS-01: Persist bot records and list them in the UI
 
 - Depends on: `TB-02`, `TB-04`
 - Outcome: A bot can be created in the database and appears in the Bot Manager list.
