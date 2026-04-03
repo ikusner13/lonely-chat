@@ -11,11 +11,14 @@ import { createApp, makeAppRuntime } from "./app";
 import { FakeAiClientLive } from "./ai/Layers/fake-ai-client";
 import { BotEditorFormValues } from "./bots/bot-editor-fields";
 import { BotServiceLive } from "./bots/Layers/bot-service";
-import { BotRecord, BotId } from "./bots/bot-record";
+import { BotId, BotRecord } from "./bots/bot-record";
 import { BotService } from "./bots/Services/bot-service";
 import { makeDatabaseLayer } from "./db/database";
 import { makeMockPlatformAdapter } from "./platforms/Layers/mock-platform-adapter";
 import { ChannelName, ChatUsername, PlatformAdapter } from "./platforms/Services/platform-adapter";
+import { ScenarioEditorFormValues } from "./scenarios/scenario-editor-fields";
+import { ScenarioServiceLive } from "./scenarios/Layers/scenario-service";
+import { ScenarioService } from "./scenarios/Services/scenario-service";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
 
@@ -55,28 +58,24 @@ const decodeChatStreamMessage = Schema.decodeUnknownSync(
   }),
 );
 
-const createDatabasePath = Effect.acquireRelease(
-  Effect.promise(async () => {
-    const directory = await mkdtemp(join(tmpdir(), "lonely-chat-app-"));
+const fromPromise = <Value>(value: PromiseLike<Value> | Value): Effect.Effect<Value> =>
+  Effect.promise(async (): Promise<Value> => value);
 
-    return directory;
-  }),
+const createDatabasePath = Effect.acquireRelease(
+  fromPromise(mkdtemp(join(tmpdir(), "lonely-chat-app-"))),
   (directory) =>
-    Effect.promise(async () => {
-      await rm(directory, {
+    fromPromise(
+      rm(directory, {
         force: true,
         recursive: true,
-      });
-    }).pipe(Effect.orDie),
+      }),
+    ).pipe(Effect.orDie),
 ).pipe(Effect.map((directory) => join(directory, "lonely-chat.sqlite")));
 
 const createTestRuntime = (dbPath: string) =>
   Effect.acquireRelease(
     Effect.sync(() => makeAppRuntime(dbPath)),
-    (runtime) =>
-      Effect.promise(async () => {
-        await runtime.dispose();
-      }).pipe(Effect.orDie),
+    (runtime) => fromPromise(runtime.dispose()).pipe(Effect.orDie),
   );
 
 const createTestRuntimeWithMockPlatform = (dbPath: string) =>
@@ -89,6 +88,7 @@ const createTestRuntimeWithMockPlatform = (dbPath: string) =>
         PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
       );
       const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+      const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
       const sessionServiceLayer = SessionServiceLive.pipe(
         Layer.provide(platformLayer),
         Layer.provide(FakeAiClientLive),
@@ -96,7 +96,12 @@ const createTestRuntimeWithMockPlatform = (dbPath: string) =>
         Layer.provide(databaseLayer),
       );
       const runtime = ManagedRuntime.make(
-        Layer.mergeAll(FakeAiClientLive, botServiceLayer, sessionServiceLayer),
+        Layer.mergeAll(
+          FakeAiClientLive,
+          botServiceLayer,
+          scenarioServiceLayer,
+          sessionServiceLayer,
+        ),
       ) as ReturnType<typeof makeAppRuntime>;
 
       return {
@@ -104,10 +109,7 @@ const createTestRuntimeWithMockPlatform = (dbPath: string) =>
         runtime,
       };
     }),
-    ({ runtime }) =>
-      Effect.promise(async () => {
-        await runtime.dispose();
-      }).pipe(Effect.orDie),
+    ({ runtime }) => fromPromise(runtime.dispose()).pipe(Effect.orDie),
   );
 
 const makeTestBot = (overrides?: Partial<BotRecord>): BotRecord =>
@@ -161,16 +163,39 @@ const makeValidBotFormValues = (overrides?: Partial<BotEditorFormValues>): BotEd
     ...overrides,
   });
 
+const makeValidScenarioFormValues = (
+  overrides?: Partial<ScenarioEditorFormValues>,
+): ScenarioEditorFormValues =>
+  new ScenarioEditorFormValues({
+    description: "Kick off a merch promotion sequence.",
+    durationSeconds: "45",
+    enabled: true,
+    name: "Ad CTA Hype",
+    participants: ["bot-pixel", "bot-marble"],
+    steps: JSON.stringify(
+      [
+        {
+          action: "say",
+          botId: "bot-pixel",
+          content: "check out the merch",
+          delayAfter: 3,
+        },
+      ],
+      null,
+      2,
+    ),
+    topic: "new merch drop",
+    triggerDelaySeconds: "12",
+    triggerEventType: "",
+    triggerType: "timed",
+    ...overrides,
+  });
+
 const requestApp = (
   app: ReturnType<typeof createApp>,
   url: string,
   init?: RequestInit,
-): Effect.Effect<Response> =>
-  Effect.promise(async () => {
-    const response = await app.request(url, init);
-
-    return response;
-  });
+): Effect.Effect<Response> => fromPromise(app.request(url, init));
 
 const waitForChatViewerMessage = (
   app: ReturnType<typeof createApp>,
@@ -179,11 +204,7 @@ const waitForChatViewerMessage = (
 ): Effect.Effect<string> =>
   Effect.gen(function* waitForChatViewerMessageEffect() {
     const response = yield* requestApp(app, "http://localhost/chat");
-    const body = yield* Effect.promise(async () => {
-      const text = await response.text();
-
-      return text;
-    });
+    const body = yield* fromPromise(response.text());
 
     if (body.includes(messageText) || remainingAttempts <= 1) {
       return body;
@@ -299,6 +320,36 @@ const requestBotPreviewForm = (
     method: "POST",
   });
 
+const requestScenarioForm = (
+  app: ReturnType<typeof createApp>,
+  url: string,
+  values: ScenarioEditorFormValues,
+): Effect.Effect<Response> => {
+  const body = new URLSearchParams({
+    description: values.description,
+    durationSeconds: values.durationSeconds,
+    name: values.name,
+    steps: values.steps,
+    topic: values.topic,
+    triggerDelaySeconds: values.triggerDelaySeconds,
+    triggerEventType: values.triggerEventType,
+    triggerType: values.triggerType,
+  });
+
+  for (const participant of values.participants) {
+    body.append("participants", participant);
+  }
+
+  if (values.enabled) {
+    body.set("enabled", "on");
+  }
+
+  return requestApp(app, url, {
+    body,
+    method: "POST",
+  });
+};
+
 const createStoredBot = async function createStoredBot(
   runtime: ReturnType<typeof makeAppRuntime>,
   bot: BotRecord,
@@ -319,13 +370,7 @@ describe("app shell", () => {
       const response = yield* requestApp(app, "http://localhost/health");
 
       expect(response.status).toBe(okStatus);
-      expect(
-        yield* Effect.promise(async () => {
-          const body = await response.json();
-
-          return body;
-        }),
-      ).toEqual({
+      expect(yield* fromPromise(response.json())).toEqual({
         status: "ok",
       });
     }),
@@ -338,11 +383,7 @@ describe("app shell", () => {
       const app = createApp(runtime);
 
       let response = yield* requestApp(app, "http://localhost/");
-      const body = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const body = yield* fromPromise(response.text());
 
       expect(response.status).toBe(okStatus);
       expect(body).toContain("Lonely Chat");
@@ -356,11 +397,7 @@ describe("app shell", () => {
       expect(response.status).toBe(seeOtherStatus);
 
       response = yield* requestApp(app, "http://localhost/");
-      const activeBody = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const activeBody = yield* fromPromise(response.text());
 
       expect(activeBody).toContain("Status: active");
       expect(activeBody).toContain("Platform: mock");
@@ -374,11 +411,7 @@ describe("app shell", () => {
       expect(response.status).toBe(seeOtherStatus);
 
       response = yield* requestApp(app, "http://localhost/");
-      const stoppedBody = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const stoppedBody = yield* fromPromise(response.text());
 
       expect(stoppedBody).toContain("Status: idle");
       expect(stoppedBody).toContain("Last session ended: manual");
@@ -392,11 +425,9 @@ describe("app shell", () => {
       const { mockPlatformAdapter, runtime } = yield* createTestRuntimeWithMockPlatform(dbPath);
       const app = createApp(runtime);
 
-      yield* Effect.promise(async () => {
-        await runtime.runPromise(
-          SessionService.use((sessionService) => sessionService.startSession()),
-        );
-      });
+      yield* fromPromise(
+        runtime.runPromise(SessionService.use((sessionService) => sessionService.startSession())),
+      );
       yield* Effect.yieldNow;
       yield* mockPlatformAdapter.emitIncomingMessage({
         channel: ChannelName.makeUnsafe("lonely-chat"),
@@ -415,11 +446,11 @@ describe("app shell", () => {
 
       expect(streamResponse.status).toBe(okStatus);
 
-      const streamedMessage = Effect.promise(async () => {
-        const payload = await readFirstServerSentEvent(streamResponse);
-
-        return decodeChatStreamMessage(JSON.parse(payload) as unknown);
-      });
+      const streamedMessage = Effect.promise(() =>
+        readFirstServerSentEvent(streamResponse).then((payload) =>
+          decodeChatStreamMessage(JSON.parse(payload) as unknown),
+        ),
+      );
 
       yield* Effect.yieldNow;
       yield* mockPlatformAdapter.emitIncomingMessage({
@@ -447,20 +478,12 @@ describe("app shell", () => {
       const app = createApp(runtime);
       const bot = makeTestBot();
 
-      yield* Effect.promise(async () => {
-        await createStoredBot(runtime, bot);
-      });
+      yield* fromPromise(createStoredBot(runtime, bot));
 
       const response = yield* requestApp(app, "http://localhost/api/bots");
 
       expect(response.status).toBe(okStatus);
-      expect(
-        yield* Effect.promise(async () => {
-          const body = await response.json();
-
-          return body;
-        }),
-      ).toEqual({
+      expect(yield* fromPromise(response.json())).toEqual({
         bots: [
           {
             createdAt: bot.createdAt,
@@ -502,11 +525,7 @@ describe("app shell", () => {
       expect(response.status).toBe(seeOtherStatus);
 
       response = yield* requestApp(app, "http://localhost/bots");
-      const body = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const body = yield* fromPromise(response.text());
 
       expect(response.status).toBe(okStatus);
       expect(body).toContain("Bot Manager");
@@ -518,11 +537,9 @@ describe("app shell", () => {
       expect(body).toContain("Edit bot");
 
       response = yield* requestApp(app, "http://localhost/api/bots");
-      const apiBody = yield* Effect.promise(async (): Promise<BotListApiResponse> => {
-        const payload = await response.json();
-
-        return decodeBotListApiResponse(payload);
-      });
+      const apiBody = yield* Effect.promise(() =>
+        response.json().then((payload): BotListApiResponse => decodeBotListApiResponse(payload)),
+      );
 
       expect(apiBody.bots).toEqual([
         expect.objectContaining({
@@ -551,9 +568,7 @@ describe("app shell", () => {
       const app = createApp(runtime);
       const storedBot = makeTestBot();
 
-      yield* Effect.promise(async () => {
-        await createStoredBot(runtime, storedBot);
-      });
+      yield* fromPromise(createStoredBot(runtime, storedBot));
 
       let response = yield* requestBotForm(
         app,
@@ -583,11 +598,7 @@ describe("app shell", () => {
       expect(response.status).toBe(seeOtherStatus);
 
       response = yield* requestApp(app, "http://localhost/bots");
-      const body = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const body = yield* fromPromise(response.text());
 
       expect(response.status).toBe(okStatus);
       expect(body).toContain("Marble");
@@ -599,11 +610,9 @@ describe("app shell", () => {
       expect(body).toContain("Response Length: 2-6 words");
 
       response = yield* requestApp(app, "http://localhost/api/bots");
-      const apiBody = yield* Effect.promise(async (): Promise<BotListApiResponse> => {
-        const payload = await response.json();
-
-        return decodeBotListApiResponse(payload);
-      });
+      const apiBody = yield* Effect.promise(() =>
+        response.json().then((payload): BotListApiResponse => decodeBotListApiResponse(payload)),
+      );
 
       expect(apiBody.bots).toEqual([
         expect.objectContaining({
@@ -656,11 +665,7 @@ describe("app shell", () => {
           temperature: "3",
         }),
       );
-      const body = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const body = yield* fromPromise(response.text());
 
       expect(response.status).toBe(400);
       expect(body).toContain("Name is required.");
@@ -684,19 +689,15 @@ describe("app shell", () => {
       const app = createApp(runtime);
       const storedBot = makeTestBot();
 
-      yield* Effect.promise(async () => {
-        await createStoredBot(runtime, storedBot);
-      });
+      yield* fromPromise(createStoredBot(runtime, storedBot));
 
       const response = yield* requestBotPreviewApi(app, storedBot.id, "  why is chat screaming?  ");
 
       expect(response.status).toBe(okStatus);
 
-      const body = yield* Effect.promise(async () => {
-        const payload = await response.json();
-
-        return decodeBotPreviewApiResponse(payload);
-      });
+      const body = yield* Effect.promise(() =>
+        response.json().then((payload) => decodeBotPreviewApiResponse(payload)),
+      );
 
       expect(body).toEqual({
         model: "openai/gpt-5-mini",
@@ -713,26 +714,143 @@ describe("app shell", () => {
       const app = createApp(runtime);
       const storedBot = makeTestBot();
 
-      yield* Effect.promise(async () => {
-        await createStoredBot(runtime, storedBot);
-      });
+      yield* fromPromise(createStoredBot(runtime, storedBot));
 
       const response = yield* requestBotPreviewForm(
         app,
         storedBot.id,
         "what happened to that split?",
       );
-      const body = yield* Effect.promise(async () => {
-        const text = await response.text();
-
-        return text;
-      });
+      const body = yield* fromPromise(response.text());
 
       expect(response.status).toBe(okStatus);
       expect(body).toContain("Preview Bot");
       expect(body).toContain(
         "Preview Response: Pixel: [fake:openai/gpt-5-mini] what happened to that split?",
       );
+    }),
+  );
+
+  it.effect("creates, updates, and deletes scenarios from the scenarios page", () =>
+    Effect.gen(function* createsUpdatesAndDeletesScenariosFromTheScenariosPage() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+      const pixel = makeTestBot();
+      const marble = makeTestBot({
+        displayName: "Marble",
+        id: BotId.makeUnsafe("bot-marble"),
+        name: "marble_bot",
+      });
+
+      yield* fromPromise(
+        Promise.all([createStoredBot(runtime, pixel), createStoredBot(runtime, marble)]),
+      );
+
+      let response = yield* requestScenarioForm(
+        app,
+        "http://localhost/scenarios",
+        makeValidScenarioFormValues(),
+      );
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      const [storedScenario] = yield* Effect.promise(() =>
+        runtime.runPromise(
+          ScenarioService.use((scenarioService) => scenarioService.listScenarios()),
+        ),
+      );
+      const scenarioId = storedScenario?.id ?? "";
+
+      expect(storedScenario).toBeDefined();
+      expect(scenarioId).not.toBe("");
+
+      response = yield* requestApp(app, "http://localhost/scenarios");
+      let body = yield* fromPromise(response.text());
+
+      expect(response.status).toBe(okStatus);
+      expect(body).toContain("Scenarios");
+      expect(body).toContain("Ad CTA Hype");
+      expect(body).toContain("Kick off a merch promotion sequence.");
+      expect(body).toContain("Participants: 2");
+      expect(body).toContain("Trigger: timed");
+
+      response = yield* requestScenarioForm(
+        app,
+        `http://localhost/scenarios/${scenarioId}`,
+        makeValidScenarioFormValues({
+          description: "Stress-test a heated debate flow.",
+          durationSeconds: "",
+          enabled: false,
+          name: "Heated Debate",
+          participants: ["bot-pixel"],
+          steps: "",
+          topic: "controversial gaming opinion",
+          triggerDelaySeconds: "",
+          triggerEventType: "new_viewer_joined",
+          triggerType: "on_event",
+        }),
+      );
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      response = yield* requestApp(app, "http://localhost/scenarios");
+      body = yield* fromPromise(response.text());
+
+      expect(body).toContain("Heated Debate");
+      expect(body).toContain("Stress-test a heated debate flow.");
+      expect(body).toContain("Participants: 1");
+      expect(body).toContain("Trigger: on_event");
+      expect(body).toContain("Enabled: no");
+
+      response = yield* requestApp(app, `http://localhost/scenarios/${scenarioId}/delete`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(seeOtherStatus);
+
+      response = yield* requestApp(app, "http://localhost/scenarios");
+      body = yield* fromPromise(response.text());
+
+      expect(body).toContain("No scenarios configured yet.");
+    }),
+  );
+
+  it.effect("shows validation errors for invalid scenario form input", () =>
+    Effect.gen(function* showsValidationErrorsForInvalidScenarioFormInput() {
+      const dbPath = yield* createDatabasePath;
+      const runtime = yield* createTestRuntime(dbPath);
+      const app = createApp(runtime);
+      const pixel = makeTestBot();
+
+      yield* fromPromise(createStoredBot(runtime, pixel));
+
+      const response = yield* requestScenarioForm(
+        app,
+        "http://localhost/scenarios",
+        makeValidScenarioFormValues({
+          description: " ",
+          durationSeconds: "0",
+          enabled: false,
+          name: " ",
+          participants: [],
+          steps: "{bad json",
+          topic: " ",
+          triggerDelaySeconds: "",
+          triggerEventType: "",
+          triggerType: "timed",
+        }),
+      );
+      const body = yield* fromPromise(response.text());
+
+      expect(response.status).toBe(400);
+      expect(body).toContain("Name is required.");
+      expect(body).toContain("Description is required.");
+      expect(body).toContain("Topic is required.");
+      expect(body).toContain("Select at least one participant.");
+      expect(body).toContain("Duration must be a positive integer.");
+      expect(body).toContain("Timed triggers require delay seconds.");
+      expect(body).toContain("Steps must be valid JSON matching the scenario step schema.");
     }),
   );
 });

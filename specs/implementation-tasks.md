@@ -97,7 +97,7 @@ Use it with:
 - Spec inputs: `specs/orchestration.md`, `specs/technical-orchestrator.md`, `specs/bots.md`
 - Verify: table-driven selection tests, cooldown/cap integration tests, `vp check`, targeted `vp test`
 
-### [ ] VS-09: Timing engine and silence breaker
+### [x] VS-09: Timing engine and silence breaker
 
 - Depends on: `VS-08`
 - Outcome: Responses are delayed according to trigger type, and a silence breaker schedules a new message after inactivity.
@@ -106,7 +106,7 @@ Use it with:
 
 ## Track 3: Scenario and Cost Slices
 
-### [ ] VS-10: Persist scenarios and show them in the UI
+### [x] VS-10: Persist scenarios and show them in the UI
 
 - Depends on: `TB-02`, `TB-04`
 - Outcome: Scenarios can be created, listed, edited, and deleted in `/scenarios`.

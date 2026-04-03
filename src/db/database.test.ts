@@ -11,10 +11,12 @@ const createSettingsMigrationId = 1;
 const createSessionsMigrationId = 2;
 const createBotsMigrationId = 3;
 const createSessionMessagesMigrationId = 4;
+const createScenariosMigrationId = 5;
 const createSettingsMigrationName = "create_settings";
 const createSessionsMigrationName = "create_sessions";
 const createBotsMigrationName = "create_bots";
 const createSessionMessagesMigrationName = "create_session_messages";
+const createScenariosMigrationName = "create_scenarios";
 const updatedAt = "2026-04-02T00:00:00.000Z";
 
 interface TableRow {
@@ -62,7 +64,7 @@ const loadMigratedTables = (dbPath: string): Effect.Effect<readonly TableRow[], 
       return yield* sql<TableRow>`SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name IN ('bots', 'settings', 'session_messages', 'sessions', 'effect_sql_migrations')
+          AND name IN ('bots', 'scenarios', 'settings', 'session_messages', 'sessions', 'effect_sql_migrations')
         ORDER BY name`;
     }),
   );
@@ -116,6 +118,7 @@ describe("database runtime", () => {
       expect(tables).toEqual([
         { name: "bots" },
         { name: "effect_sql_migrations" },
+        { name: "scenarios" },
         { name: "session_messages" },
         { name: "sessions" },
         { name: "settings" },
@@ -136,6 +139,10 @@ describe("database runtime", () => {
         {
           migration_id: createSessionMessagesMigrationId,
           name: createSessionMessagesMigrationName,
+        },
+        {
+          migration_id: createScenariosMigrationId,
+          name: createScenariosMigrationName,
         },
       ]);
     }),

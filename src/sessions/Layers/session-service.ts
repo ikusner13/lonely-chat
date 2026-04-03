@@ -1,3 +1,5 @@
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -14,10 +16,14 @@ import { AiClient } from "../../ai/Services/ai-client";
 import { BotService } from "../../bots/Services/bot-service";
 import {
   advanceSpeakerState,
+  calculateResponseDelay,
+  isEligibleSpeaker,
   makeMentionResponseRequest,
+  makeSilenceBreakerRequest,
+  selectSilenceBreaker,
   selectSpeakers,
 } from "../../orchestration/mention-response";
-import type { BotSpeakerState } from "../../orchestration/mention-response";
+import type { BotSpeakerState, ResponseTrigger } from "../../orchestration/mention-response";
 import {
   BotId as PlatformBotId,
   ChannelName,
@@ -45,6 +51,7 @@ const mockPlatform = "mock";
 const sessionEndedStatus: SessionStatus = "ended";
 const sessionStartedStatus: SessionStatus = "active";
 const liveMessageBufferCapacity = 128;
+const silenceThresholdMs = 15_000;
 
 interface SessionRow {
   readonly channel: string;
@@ -73,6 +80,7 @@ type MessageListenerFiber = Fiber.Fiber<
   void,
   AiGenerationError | PlatformConnectionError | PlatformSendError | SqlError
 >;
+type SessionTaskFiber = Fiber.Fiber<void, unknown>;
 
 const makeSessionRecord = (row: SessionRow): SessionRecord =>
   new SessionRecord({
@@ -152,7 +160,10 @@ export const SessionServiceLive = Layer.effect(
         ),
       );
       const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
+      const scheduledResponseFibersRef = yield* Ref.make<readonly SessionTaskFiber[]>([]);
+      const silenceBreakerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
+      const lastActivityAtRef = yield* Ref.make<number | null>(null);
 
       const persistMessage = Effect.fn("SessionService.persistMessage")(
         function* persistMessageEffect(sessionId: SessionId, message: ChatMessage) {
@@ -187,6 +198,7 @@ export const SessionServiceLive = Layer.effect(
           WHERE id = ${sessionId}`;
 
           yield* PubSub.publish(liveMessagesPubSub, storedMessage);
+          yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
         },
       );
 
@@ -211,6 +223,85 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const interruptTrackedFibers = Effect.fn("SessionService.interruptTrackedFibers")(
+        function* interruptTrackedFibersEffect() {
+          const scheduledResponseFibers = yield* Ref.get(scheduledResponseFibersRef);
+
+          for (const fiber of scheduledResponseFibers) {
+            yield* Fiber.interrupt(fiber);
+          }
+
+          yield* Ref.set(scheduledResponseFibersRef, []);
+        },
+      );
+
+      const stopSilenceBreaker = Effect.fn("SessionService.stopSilenceBreaker")(
+        function* stopSilenceBreakerEffect() {
+          const silenceBreaker = yield* Ref.get(silenceBreakerRef);
+
+          if (silenceBreaker === null) {
+            return;
+          }
+
+          yield* Fiber.interrupt(silenceBreaker);
+          yield* Ref.set(silenceBreakerRef, null);
+        },
+      );
+
+      const scheduleResponse = Effect.fn("SessionService.scheduleResponse")(
+        function* scheduleResponseEffect(
+          session: SessionRecord,
+          bot: Parameters<typeof makeMentionResponseRequest>[0],
+          trigger: ResponseTrigger,
+          request: Parameters<typeof aiClient.generateText>[0],
+          selectionIndex = 0,
+        ) {
+          const scheduledResponse = yield* Effect.gen(function* runScheduledResponseEffect() {
+            const responseSelectionIndex = Number(selectionIndex);
+            const responseDelay = calculateResponseDelay(trigger, {
+              selectionIndex: responseSelectionIndex,
+            });
+
+            yield* Effect.sleep(Duration.millis(responseDelay));
+
+            const activeSession = yield* Ref.get(activeSessionRef);
+
+            if (activeSession?.id !== session.id) {
+              return;
+            }
+
+            const now = yield* Clock.currentTimeMillis;
+
+            if (!isEligibleSpeaker(bot, yield* Ref.get(speakerStatesRef), now)) {
+              return;
+            }
+
+            const speakerConnection = {
+              botId: PlatformBotId.makeUnsafe(bot.id),
+              channel: session.channel,
+              platform: session.platform,
+              username: ChatUsername.makeUnsafe(bot.name),
+            } as const;
+
+            yield* platformAdapter.connect(speakerConnection);
+
+            const response = yield* aiClient.generateText(request);
+
+            yield* platformAdapter.sendMessage(speakerConnection, response.text);
+            yield* Ref.set(
+              speakerStatesRef,
+              advanceSpeakerState(
+                yield* Ref.get(speakerStatesRef),
+                speakerConnection.botId,
+                yield* Clock.currentTimeMillis,
+              ),
+            );
+          }).pipe(Effect.forkIn(serviceScope));
+
+          yield* Ref.update(scheduledResponseFibersRef, (fibers) => [...fibers, scheduledResponse]);
+        },
+      );
+
       const maybeRespondToMessage = Effect.fn("SessionService.maybeRespondToMessage")(
         function* maybeRespondToMessageEffect(session: SessionRecord, message: ChatMessage) {
           if (message.direction !== "incoming") {
@@ -220,7 +311,7 @@ export const SessionServiceLive = Layer.effect(
           const speakerStates = yield* Ref.get(speakerStatesRef);
           const selectedSpeakers = selectSpeakers(message.text, yield* botService.listBots(), {
             botStates: speakerStates,
-            now: Date.now(),
+            now: yield* Clock.currentTimeMillis,
             recentMessages: yield* getSessionMessages(session.id),
           });
 
@@ -228,30 +319,67 @@ export const SessionServiceLive = Layer.effect(
             return;
           }
 
+          let selectionIndex = 0;
+
           for (const selectedSpeaker of selectedSpeakers) {
-            const speakerConnection = {
-              botId: PlatformBotId.makeUnsafe(selectedSpeaker.bot.id),
-              channel: session.channel,
-              platform: session.platform,
-              username: ChatUsername.makeUnsafe(selectedSpeaker.bot.name),
-            } as const;
-
-            yield* platformAdapter.connect(speakerConnection);
-
-            const response = yield* aiClient.generateText(
+            yield* scheduleResponse(
+              session,
+              selectedSpeaker.bot,
+              selectedSpeaker.reason,
               makeMentionResponseRequest(selectedSpeaker.bot, message),
+              selectionIndex,
             );
 
-            yield* platformAdapter.sendMessage(speakerConnection, response.text);
-            yield* Ref.set(
-              speakerStatesRef,
-              advanceSpeakerState(
-                yield* Ref.get(speakerStatesRef),
-                speakerConnection.botId,
-                Date.now(),
-              ),
-            );
+            selectionIndex += 1;
           }
+        },
+      );
+
+      const startSilenceBreaker = Effect.fn("SessionService.startSilenceBreaker")(
+        function* startSilenceBreakerEffect(session: SessionRecord) {
+          yield* stopSilenceBreaker();
+
+          const silenceBreaker = yield* Effect.forever(
+            Effect.gen(function* watchForSilenceEffect() {
+              yield* Effect.sleep(Duration.millis(silenceThresholdMs));
+
+              const activeSession = yield* Ref.get(activeSessionRef);
+
+              if (activeSession?.id !== session.id) {
+                return;
+              }
+
+              const lastActivityAt = yield* Ref.get(lastActivityAtRef);
+
+              if (lastActivityAt === null) {
+                return;
+              }
+
+              const now = yield* Clock.currentTimeMillis;
+
+              if (now - lastActivityAt < silenceThresholdMs) {
+                return;
+              }
+
+              const silenceBreakerBot = selectSilenceBreaker(yield* botService.listBots(), {
+                botStates: yield* Ref.get(speakerStatesRef),
+                now,
+              });
+
+              if (silenceBreakerBot === null) {
+                return;
+              }
+
+              yield* scheduleResponse(
+                session,
+                silenceBreakerBot,
+                "silence",
+                makeSilenceBreakerRequest(silenceBreakerBot, session.platform),
+              );
+            }),
+          ).pipe(Effect.forkIn(serviceScope));
+
+          yield* Ref.set(silenceBreakerRef, silenceBreaker);
         },
       );
 
@@ -365,7 +493,9 @@ export const SessionServiceLive = Layer.effect(
             )`;
         yield* Ref.set(activeSessionRef, session);
         yield* Ref.set(speakerStatesRef, []);
+        yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
         yield* startMessageListener(session);
+        yield* startSilenceBreaker(session);
 
         return session;
       });
@@ -393,7 +523,10 @@ export const SessionServiceLive = Layer.effect(
               end_reason = ${endedSession.endReason}
           WHERE id = ${endedSession.id}`;
         yield* stopMessageListener();
+        yield* stopSilenceBreaker();
+        yield* interruptTrackedFibers();
         yield* Ref.set(activeSessionRef, null);
+        yield* Ref.set(lastActivityAtRef, null);
         yield* Ref.set(speakerStatesRef, []);
 
         return endedSession;

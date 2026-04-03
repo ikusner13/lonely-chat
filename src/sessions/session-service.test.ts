@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { TestClock } from "effect/testing";
 
 import { FakeAiClientLive, makeFakeAiClient } from "../ai/Layers/fake-ai-client";
 import { AiClient } from "../ai/Services/ai-client";
@@ -420,6 +421,9 @@ describe("session service", () => {
           text: "hey @pixel you there?",
           username: ChatUsername.makeUnsafe("viewer-1"),
         });
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+
+        yield* TestClock.adjust("3 seconds");
 
         expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
         expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
@@ -496,33 +500,42 @@ describe("session service", () => {
           text: "hey @pixel @echo @nova @luna sound off",
           username: ChatUsername.makeUnsafe("viewer-1"),
         });
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+
+        yield* TestClock.adjust("6 seconds");
 
         expect(yield* waitForStoredSessionMessages(dbPath, 4)).toHaveLength(4);
-        expect(yield* fakeAiClient.getRequests).toEqual([
-          expect.objectContaining({
-            botName: "Pixel",
-          }),
-          expect.objectContaining({
-            botName: "Echo",
-          }),
-          expect.objectContaining({
-            botName: "Nova",
-          }),
-        ]);
-        expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
-          expect.objectContaining({
-            botId: makeBotConnection(pixel).botId,
-            username: ChatUsername.makeUnsafe("pixel"),
-          }),
-          expect.objectContaining({
-            botId: makeBotConnection(echo).botId,
-            username: ChatUsername.makeUnsafe("echo"),
-          }),
-          expect.objectContaining({
-            botId: makeBotConnection(nova).botId,
-            username: ChatUsername.makeUnsafe("nova"),
-          }),
-        ]);
+        expect(yield* fakeAiClient.getRequests).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              botName: "Pixel",
+            }),
+            expect.objectContaining({
+              botName: "Echo",
+            }),
+            expect.objectContaining({
+              botName: "Nova",
+            }),
+          ]),
+        );
+        expect(yield* fakeAiClient.getRequests).toHaveLength(3);
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              botId: makeBotConnection(pixel).botId,
+              username: ChatUsername.makeUnsafe("pixel"),
+            }),
+            expect.objectContaining({
+              botId: makeBotConnection(echo).botId,
+              username: ChatUsername.makeUnsafe("echo"),
+            }),
+            expect.objectContaining({
+              botId: makeBotConnection(nova).botId,
+              username: ChatUsername.makeUnsafe("nova"),
+            }),
+          ]),
+        );
+        expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(3);
       }).pipe(Effect.provide(appLayer));
     }),
   );
@@ -551,6 +564,7 @@ describe("session service", () => {
           text: "hey @pixel first call",
           username: ChatUsername.makeUnsafe("viewer-1"),
         });
+        yield* TestClock.adjust("3 seconds");
         expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
 
         yield* mockPlatformAdapter.emitIncomingMessage({
@@ -563,6 +577,95 @@ describe("session service", () => {
         expect(yield* fakeAiClient.getRequests).toHaveLength(1);
         expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(1);
         expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(3);
+      }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("delays mention responses until the timing window opens", () =>
+    Effect.gen(function* delaysMentionResponsesUntilTheTimingWindowOpens() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, makeStoredBot());
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      yield* Effect.gen(function* exerciseMentionDelay() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel slow down",
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        });
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+
+        yield* TestClock.adjust("999 millis");
+
+        expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(1);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(0);
+
+        yield* TestClock.adjust("2001 millis");
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(1);
+      }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("schedules a silence-breaker response after inactivity", () =>
+    Effect.gen(function* schedulesASilenceBreakerResponseAfterInactivity() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(
+        dbPath,
+        makeStoredBot({
+          talkativeness: 100,
+        }),
+      );
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      yield* Effect.gen(function* exerciseSilenceBreaker() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* TestClock.adjust("14 seconds");
+
+        expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(0);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(0);
+
+        yield* TestClock.adjust("9 seconds");
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+        const [silenceBreakerRequest] = yield* fakeAiClient.getRequests;
+        const silenceBreakerMessage = silenceBreakerRequest?.messages.find(
+          (message) => message.role === "user",
+        );
+
+        expect(silenceBreakerRequest).toBeDefined();
+        expect(silenceBreakerMessage).toEqual(
+          expect.objectContaining({
+            content: "Start a new conversation topic naturally.",
+            role: "user",
+          }),
+        );
+        expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(1);
       }).pipe(Effect.provide(appLayer));
     }),
   );

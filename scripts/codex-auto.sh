@@ -105,8 +105,8 @@ Options:
   --max-attempts-per-slice
                          Stop after n unfinished attempts on the same slice (default: 6)
   --codex-preview-lines <n>
-                         Show the last n non-empty Codex log lines on heartbeat (default: 6)
-  --no-codex-preview     Hide live Codex log excerpts in the terminal
+                         Show up to n recent command output lines per Codex event (default: 6)
+  --no-codex-preview     Hide live Codex JSON event filtering in the terminal
   --status                Print the current `.codex-auto/status.json` and exit
   --help                  Show this message
 EOF
@@ -173,29 +173,85 @@ write_status() {
     }' > "$STATUS_FILE"
 }
 
-print_codex_preview() {
-  local agent_log_file="$1"
-  local preview
-
-  if [[ "$SHOW_CODEX_PREVIEW" != true || ! -f "$agent_log_file" ]]; then
-    return 0
-  fi
-
-  preview="$(
-    tail -n $((CODEX_PREVIEW_LINES * 6)) "$agent_log_file" 2>/dev/null \
-      | sed '/^[[:space:]]*$/d' \
-      | tail -n "$CODEX_PREVIEW_LINES"
-  )"
-
-  if [[ -z "$preview" || "$preview" == "$LAST_CODEX_PREVIEW" ]]; then
-    return 0
-  fi
+print_prefixed_lines() {
+  local prefix="$1"
+  local text="$2"
+  local limit="${3:-$CODEX_PREVIEW_LINES}"
+  local count=0
 
   while IFS= read -r line; do
-    echo "[codex-auto][codex] $line"
-  done <<< "$preview"
+    if [[ -z "$line" ]]; then
+      continue
+    fi
 
-  LAST_CODEX_PREVIEW="$preview"
+    echo "$prefix $line"
+    count=$((count + 1))
+
+    if (( count >= limit )); then
+      break
+    fi
+  done <<< "$text"
+}
+
+stream_filter() {
+  local line
+  local item_type
+  local command
+  local exit_code
+  local text
+  local aggregated_output
+  local thread_id
+  local usage
+
+  while IFS= read -r line; do
+    if [[ -z "$line" || "$SHOW_CODEX_PREVIEW" != true ]]; then
+      continue
+    fi
+
+    case "$(jq -r '.type // empty' <<< "$line" 2>/dev/null)" in
+      "thread.started")
+        thread_id="$(jq -r '.thread_id // empty' <<< "$line" 2>/dev/null)"
+        if [[ -n "$thread_id" ]]; then
+          echo "[codex-auto][thread] $thread_id"
+        fi
+        ;;
+      "turn.started")
+        echo "[codex-auto][turn] started"
+        ;;
+      "turn.completed")
+        usage="$(jq -r '"input_tokens=\(.usage.input_tokens // 0) output_tokens=\(.usage.output_tokens // 0)"' <<< "$line" 2>/dev/null)"
+        echo "[codex-auto][turn] completed $usage"
+        ;;
+      "item.started")
+        item_type="$(jq -r '.item.type // empty' <<< "$line" 2>/dev/null)"
+        if [[ "$item_type" == "command_execution" ]]; then
+          command="$(jq -r '.item.command // empty' <<< "$line" 2>/dev/null)"
+          echo "[codex-auto][cmd] $command"
+        fi
+        ;;
+      "item.completed")
+        item_type="$(jq -r '.item.type // empty' <<< "$line" 2>/dev/null)"
+
+        case "$item_type" in
+          "agent_message")
+            text="$(jq -r '.item.text // empty' <<< "$line" 2>/dev/null)"
+            if [[ -n "$text" ]]; then
+              print_prefixed_lines "[codex-auto][agent]" "$text" 20
+            fi
+            ;;
+          "command_execution")
+            command="$(jq -r '.item.command // empty' <<< "$line" 2>/dev/null)"
+            exit_code="$(jq -r '.item.exit_code // empty' <<< "$line" 2>/dev/null)"
+            echo "[codex-auto][cmd] exit=$exit_code $command"
+            aggregated_output="$(jq -r '.item.aggregated_output // empty' <<< "$line" 2>/dev/null)"
+            if [[ -n "$aggregated_output" ]]; then
+              print_prefixed_lines "[codex-auto][cmd-out]" "$aggregated_output"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+  done
 }
 
 require_command() {
@@ -319,21 +375,27 @@ EOF
 run_agent() {
   local iteration="$1"
   local agent_log_file="$OUT_DIR/codex.$iteration.log"
-  LAST_CODEX_PREVIEW=""
+  local agent_stderr_file="$OUT_DIR/codex.$iteration.stderr.log"
+  local agent_fifo="$OUT_DIR/codex.$iteration.fifo"
 
-  rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE" "$agent_log_file"
+  rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE" "$agent_log_file" "$agent_stderr_file" "$agent_fifo"
+  mkfifo "$agent_fifo"
   log "starting Codex iteration $iteration; raw log: $agent_log_file"
   write_status "running_codex" "$iteration" "" "" "Starting Codex agent run." "" "$agent_log_file"
 
+  cat "$agent_fifo" | tee "$agent_log_file" | stream_filter &
+  local stream_pid="$!"
+
   codex exec \
     --dangerously-bypass-approvals-and-sandbox \
+    --json \
     --model "$MODEL" \
     -c "model_reasoning_effort=\"$REASONING\"" \
     -c "service_tier=\"$SERVICE_TIER\"" \
     --cd "$ROOT" \
     --output-schema "$SCHEMA_FILE" \
     --output-last-message "$RESULT_FILE" \
-    - < "$PROMPT_FILE" >"$agent_log_file" 2>&1 &
+    - < "$PROMPT_FILE" >"$agent_fifo" 2>"$agent_stderr_file" &
   local agent_pid="$!"
   write_status "running_codex" "$iteration" "" "" "Codex agent is running." "$agent_pid" "$agent_log_file"
 
@@ -357,6 +419,10 @@ EOF
   (
     local previous_size=0
     local stalled_seconds=0
+    local current_stdout_size=0
+    local current_stderr_size=0
+    local current_size=0
+    local delta=0
 
     while kill -0 "$agent_pid" >/dev/null 2>&1; do
       sleep "$HEARTBEAT_SECONDS"
@@ -365,13 +431,19 @@ EOF
         break
       fi
 
-      local current_size=0
-      local delta=0
-
       if [[ -f "$agent_log_file" ]]; then
-        current_size="$(wc -c < "$agent_log_file" | tr -d ' ')"
+        current_stdout_size="$(wc -c < "$agent_log_file" | tr -d ' ')"
+      else
+        current_stdout_size=0
       fi
 
+      if [[ -f "$agent_stderr_file" ]]; then
+        current_stderr_size="$(wc -c < "$agent_stderr_file" | tr -d ' ')"
+      else
+        current_stderr_size=0
+      fi
+
+      current_size=$((current_stdout_size + current_stderr_size))
       delta=$((current_size - previous_size))
       previous_size="$current_size"
       if (( delta > 0 )); then
@@ -379,10 +451,7 @@ EOF
       else
         stalled_seconds=$((stalled_seconds + HEARTBEAT_SECONDS))
       fi
-      log "Codex iteration $iteration still running; pid=$agent_pid log_bytes=$current_size delta_bytes=$delta raw_log=$agent_log_file"
-      if (( delta > 0 )); then
-        print_codex_preview "$agent_log_file"
-      fi
+      log "Codex iteration $iteration still running; pid=$agent_pid stdout_bytes=$current_stdout_size stderr_bytes=$current_stderr_size delta_bytes=$delta raw_log=$agent_log_file"
       if (( stalled_seconds >= STALL_TIMEOUT_SECONDS )); then
         if [[ ! -f "$AGENT_TIMEOUT_FILE" ]]; then
           cat > "$AGENT_TIMEOUT_FILE" <<EOF
@@ -422,15 +491,17 @@ EOF
   wait "$watchdog_pid" >/dev/null 2>&1 || true
   kill "$heartbeat_pid" >/dev/null 2>&1 || true
   wait "$heartbeat_pid" >/dev/null 2>&1 || true
+  wait "$stream_pid" >/dev/null 2>&1 || true
+  rm -f "$agent_fifo"
 
   if [[ -f "$AGENT_TIMEOUT_FILE" ]]; then
-    echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE and $agent_log_file" >&2
+    echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s or stalled for ${STALL_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE, $agent_log_file, and $agent_stderr_file" >&2
     write_status "timed_out" "$iteration" "" "" "Codex timed out." "$agent_pid" "$agent_log_file"
     return 124
   fi
 
   if [[ ! -f "$RESULT_FILE" ]]; then
-    echo "codex exec exited without writing $RESULT_FILE; see $agent_log_file" >&2
+    echo "codex exec exited without writing $RESULT_FILE; see $agent_log_file and $agent_stderr_file" >&2
     write_status "agent_failed" "$iteration" "" "" "Codex exited without a structured result." "$agent_pid" "$agent_log_file"
     return 1
   fi

@@ -27,14 +27,26 @@ import type { BotEditorFormErrors } from "./bots/bot-editor-fields";
 import type { BotRecord } from "./bots/bot-record";
 import { getDatabasePath, makeDatabaseLayer } from "./db/database";
 import { MockPlatformAdapterLive } from "./platforms/Layers/mock-platform-adapter";
+import {
+  makeEmptyScenarioEditorFormValues,
+  makeScenarioEditorFormValues,
+  makeScenarioRecordFromEditorFields,
+  parseScenarioEditorFields,
+  ScenarioEditorFormValues,
+} from "./scenarios/scenario-editor-fields";
+import { ScenarioServiceLive } from "./scenarios/Layers/scenario-service";
+import { ScenarioId } from "./scenarios/scenario-record";
+import { ScenarioService } from "./scenarios/Services/scenario-service";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
 import type { SessionMessageRecord } from "./sessions/session-message-record";
 import type { SessionRecord } from "./sessions/session-record";
+import type { ScenarioEditorFormErrors } from "./scenarios/scenario-editor-fields";
+import type { ScenarioRecord } from "./scenarios/scenario-record";
 
 const badRequestStatus = 400;
 const redirectSeeOtherStatus = 303;
-type AppServices = AiClient | BotService | SessionService;
+type AppServices = AiClient | BotService | ScenarioService | SessionService;
 
 interface BotFormState {
   readonly errors: BotEditorFormErrors;
@@ -45,6 +57,11 @@ interface BotPreviewState {
   readonly error?: string;
   readonly prompt: string;
   readonly response: string | null;
+}
+
+interface ScenarioFormState {
+  readonly errors: ScenarioEditorFormErrors;
+  readonly values: ScenarioEditorFormValues;
 }
 
 interface ChatViewerState {
@@ -111,6 +128,7 @@ const renderDashboardDocument = (
       <nav>
         <a href="/chat">Chat Viewer</a>
         <a href="/bots">Bot Manager</a>
+        <a href="/scenarios">Scenarios</a>
       </nav>
       <section>
         <h2>Session</h2>
@@ -162,6 +180,14 @@ const renderPlatformOptions = (platform: string): string => `<option value="twit
   platform === "twitch" ? " selected" : ""
 }>twitch</option>
           <option value="kick"${platform === "kick" ? " selected" : ""}>kick</option>`;
+
+const makeScenarioFormState = (
+  values: ScenarioEditorFormValues,
+  errors: ScenarioEditorFormErrors = {},
+): ScenarioFormState => ({
+  errors,
+  values,
+});
 
 const renderTextInputField = (
   name: string,
@@ -377,6 +403,7 @@ const renderBotManagerDocument = (
       <nav>
         <a href="/">Dashboard</a>
         <a href="/chat">Chat Viewer</a>
+        <a href="/scenarios">Scenarios</a>
       </nav>
       <section>
         <h2>Create Bot</h2>
@@ -385,6 +412,170 @@ const renderBotManagerDocument = (
       <section>
         <h2>Bot List</h2>
         ${renderBotList(bots, editForms, previewStates)}
+      </section>
+    </main>
+  </body>
+</html>`;
+
+const renderScenarioTriggerTypeOptions = (triggerType: string): string => `<option value="manual"${
+  triggerType === "manual" ? " selected" : ""
+}>manual</option>
+          <option value="timed"${triggerType === "timed" ? " selected" : ""}>timed</option>
+          <option value="on_event"${triggerType === "on_event" ? " selected" : ""}>on_event</option>`;
+
+const renderScenarioParticipants = (
+  bots: readonly BotRecord[],
+  selectedParticipants: readonly string[],
+): string => {
+  if (bots.length === 0) {
+    return "<p>No bots available yet. Create bots first.</p>";
+  }
+
+  return bots
+    .map(
+      (bot) => `<label>
+            <input
+              name="participants"
+              type="checkbox"
+              value="${escapeHtml(bot.id)}"
+              ${selectedParticipants.includes(bot.id) ? "checked" : ""}
+            />
+            ${escapeHtml(bot.displayName)} (@${escapeHtml(bot.name)})
+          </label>`,
+    )
+    .join("");
+};
+
+const renderScenarioEditorForm = (
+  action: string,
+  submitLabel: string,
+  formState: ScenarioFormState,
+  bots: readonly BotRecord[],
+): string => `<form action="${action}" method="post">
+          ${renderTextInputField("name", "Name", formState.values.name, formState.errors.name)}
+          ${renderTextareaField(
+            "description",
+            "Description",
+            formState.values.description,
+            formState.errors.description,
+            3,
+          )}
+          ${renderTextInputField("topic", "Topic", formState.values.topic, formState.errors.topic)}
+          <fieldset>
+            <legend>Participants</legend>
+            ${renderScenarioParticipants(bots, formState.values.participants)}
+          </fieldset>
+          ${renderFieldError(formState.errors.participants)}
+          <label>
+            Trigger Type
+            <select name="triggerType">
+              ${renderScenarioTriggerTypeOptions(formState.values.triggerType)}
+            </select>
+          </label>
+          ${renderFieldError(formState.errors.triggerType)}
+          ${renderTextInputField(
+            "triggerDelaySeconds",
+            "Trigger Delay Seconds",
+            formState.values.triggerDelaySeconds,
+            formState.errors.triggerDelaySeconds,
+            ' inputmode="numeric"',
+          )}
+          ${renderTextInputField(
+            "triggerEventType",
+            "Trigger Event Type",
+            formState.values.triggerEventType,
+            formState.errors.triggerEventType,
+          )}
+          ${renderTextInputField(
+            "durationSeconds",
+            "Duration Seconds",
+            formState.values.durationSeconds,
+            formState.errors.durationSeconds,
+            ' inputmode="numeric"',
+          )}
+          ${renderTextareaField(
+            "steps",
+            "Steps JSON",
+            formState.values.steps,
+            formState.errors.steps,
+            8,
+          )}
+          <label>
+            <input
+              name="enabled"
+              type="checkbox"
+              ${formState.values.enabled ? "checked" : ""}
+            />
+            Enabled
+          </label>
+          <button type="submit">${submitLabel}</button>
+        </form>`;
+
+const renderScenarioList = (
+  scenarios: readonly ScenarioRecord[],
+  bots: readonly BotRecord[],
+  editForms: ReadonlyMap<string, ScenarioFormState>,
+): string => {
+  if (scenarios.length === 0) {
+    return "<p>No scenarios configured yet.</p>";
+  }
+
+  return `<ul>
+      ${scenarios
+        .map((scenario) => {
+          const editFormState =
+            editForms.get(scenario.id) ??
+            makeScenarioFormState(makeScenarioEditorFormValues(scenario));
+
+          return `<li>
+            <strong>${escapeHtml(scenario.name)}</strong><br />
+            ${escapeHtml(scenario.description)}<br />
+            Topic: ${escapeHtml(scenario.topic)}<br />
+            Participants: ${scenario.participants.length}<br />
+            Trigger: ${escapeHtml(scenario.triggerType)}<br />
+            Duration: ${scenario.durationSeconds ?? "none"}<br />
+            Enabled: ${scenario.enabled ? "yes" : "no"}
+            <details>
+              <summary>Edit scenario</summary>
+              ${renderScenarioEditorForm(`/scenarios/${scenario.id}`, "Save Scenario", editFormState, bots)}
+              <form action="/scenarios/${scenario.id}/delete" method="post">
+                <button type="submit">Delete Scenario</button>
+              </form>
+            </details>
+          </li>`;
+        })
+        .join("")}
+    </ul>`;
+};
+
+const renderScenarioManagerDocument = (
+  scenarios: readonly ScenarioRecord[],
+  bots: readonly BotRecord[],
+  createForm: ScenarioFormState,
+  editForms: ReadonlyMap<string, ScenarioFormState>,
+): string => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lonely Chat Scenarios</title>
+  </head>
+  <body>
+    <main>
+      <h1>Scenarios</h1>
+      <p>Manage predefined chat sequences for active sessions.</p>
+      <nav>
+        <a href="/">Dashboard</a>
+        <a href="/chat">Chat Viewer</a>
+        <a href="/bots">Bot Manager</a>
+      </nav>
+      <section>
+        <h2>Create Scenario</h2>
+        ${renderScenarioEditorForm("/scenarios", "Create Scenario", createForm, bots)}
+      </section>
+      <section>
+        <h2>Scenario List</h2>
+        ${renderScenarioList(scenarios, bots, editForms)}
       </section>
     </main>
   </body>
@@ -424,8 +615,16 @@ const loadBots = Effect.fn("App.loadBots")(function* loadBots() {
   return yield* BotService.use((botService) => botService.listBots());
 });
 
+const loadScenarios = Effect.fn("App.loadScenarios")(function* loadScenarios() {
+  return yield* ScenarioService.use((scenarioService) => scenarioService.listScenarios());
+});
+
 const loadBot = Effect.fn("App.loadBot")(function* loadBot(botId: BotId) {
   return yield* BotService.use((botService) => botService.getBot(botId));
+});
+
+const loadScenario = Effect.fn("App.loadScenario")(function* loadScenario(scenarioId: ScenarioId) {
+  return yield* ScenarioService.use((scenarioService) => scenarioService.getScenario(scenarioId));
 });
 
 const previewBot = Effect.fn("App.previewBot")(function* previewBot(
@@ -475,6 +674,22 @@ const readBotFormValues = (formData: FormData): BotEditorFormValues =>
     talkativeness: readStringFormField(formData, "talkativeness"),
     temperature: readStringFormField(formData, "temperature"),
     vocabularyRules: readStringFormField(formData, "vocabularyRules"),
+  });
+
+const readScenarioFormValues = (formData: FormData): ScenarioEditorFormValues =>
+  new ScenarioEditorFormValues({
+    description: readStringFormField(formData, "description"),
+    durationSeconds: readStringFormField(formData, "durationSeconds"),
+    enabled: formData.get("enabled") === "on",
+    name: readStringFormField(formData, "name"),
+    participants: formData
+      .getAll("participants")
+      .flatMap((value) => (typeof value === "string" ? [value] : [])),
+    steps: readStringFormField(formData, "steps"),
+    topic: readStringFormField(formData, "topic"),
+    triggerDelaySeconds: readStringFormField(formData, "triggerDelaySeconds"),
+    triggerEventType: readStringFormField(formData, "triggerEventType"),
+    triggerType: readStringFormField(formData, "triggerType"),
   });
 
 const serializeBot = (bot: BotRecord) => ({
@@ -638,6 +853,7 @@ export const makeAppRuntime = (
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
   const databaseLayer = makeDatabaseLayer(dbPath);
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
   const sessionServiceLayer = SessionServiceLive.pipe(
     Layer.provide(MockPlatformAdapterLive),
     Layer.provide(FakeAiClientLive),
@@ -646,7 +862,7 @@ export const makeAppRuntime = (
   );
 
   return ManagedRuntime.make(
-    Layer.mergeAll(FakeAiClientLive, botServiceLayer, sessionServiceLayer),
+    Layer.mergeAll(FakeAiClientLive, botServiceLayer, scenarioServiceLayer, sessionServiceLayer),
   );
 };
 
@@ -738,6 +954,22 @@ export const createApp = (
         bots,
         makeBotFormState(makeEmptyBotEditorFormValues()),
         new Map(),
+        new Map(),
+      ),
+    );
+  });
+
+  app.get("/scenarios", async (context) => {
+    const [bots, scenarios] = await Promise.all([
+      runtime.runPromise(loadBots()),
+      runtime.runPromise(loadScenarios()),
+    ]);
+
+    return context.html(
+      renderScenarioManagerDocument(
+        scenarios,
+        bots,
+        makeScenarioFormState(makeEmptyScenarioEditorFormValues()),
         new Map(),
       ),
     );
@@ -879,6 +1111,93 @@ export const createApp = (
         new Map([[bot.id, makeBotPreviewState(parsedInput.input.prompt, preview.response)]]),
       ),
     );
+  });
+
+  app.post("/scenarios", async (context) => {
+    const formValues = readScenarioFormValues(await context.req.formData());
+    const parsedForm = parseScenarioEditorFields(formValues);
+    const [bots, scenarios] = await Promise.all([
+      runtime.runPromise(loadBots()),
+      runtime.runPromise(loadScenarios()),
+    ]);
+
+    if (parsedForm.editorFields === null) {
+      return context.html(
+        renderScenarioManagerDocument(
+          scenarios,
+          bots,
+          makeScenarioFormState(parsedForm.values, parsedForm.errors),
+          new Map(),
+        ),
+        badRequestStatus,
+      );
+    }
+
+    await runtime.runPromise(
+      ScenarioService.use((scenarioService) =>
+        scenarioService.createScenario(
+          makeScenarioRecordFromEditorFields(parsedForm.editorFields, new Date().toISOString()),
+        ),
+      ),
+    );
+
+    return context.redirect("/scenarios", redirectSeeOtherStatus);
+  });
+
+  app.post("/scenarios/:scenarioId", async (context) => {
+    const scenarioId = ScenarioId.makeUnsafe(context.req.param("scenarioId"));
+    const existingScenario = await runtime.runPromise(loadScenario(scenarioId));
+
+    if (existingScenario === null) {
+      return context.notFound();
+    }
+
+    const formValues = readScenarioFormValues(await context.req.formData());
+    const parsedForm = parseScenarioEditorFields(formValues);
+    const [bots, scenarios] = await Promise.all([
+      runtime.runPromise(loadBots()),
+      runtime.runPromise(loadScenarios()),
+    ]);
+
+    if (parsedForm.editorFields === null) {
+      const editForms = new Map<string, ScenarioFormState>([
+        [existingScenario.id, makeScenarioFormState(parsedForm.values, parsedForm.errors)],
+      ]);
+
+      return context.html(
+        renderScenarioManagerDocument(
+          scenarios,
+          bots,
+          makeScenarioFormState(makeEmptyScenarioEditorFormValues()),
+          editForms,
+        ),
+        badRequestStatus,
+      );
+    }
+
+    await runtime.runPromise(
+      ScenarioService.use((scenarioService) =>
+        scenarioService.updateScenario(
+          makeScenarioRecordFromEditorFields(
+            parsedForm.editorFields,
+            new Date().toISOString(),
+            existingScenario,
+          ),
+        ),
+      ),
+    );
+
+    return context.redirect("/scenarios", redirectSeeOtherStatus);
+  });
+
+  app.post("/scenarios/:scenarioId/delete", async (context) => {
+    const scenarioId = ScenarioId.makeUnsafe(context.req.param("scenarioId"));
+
+    await runtime.runPromise(
+      ScenarioService.use((scenarioService) => scenarioService.deleteScenario(scenarioId)),
+    );
+
+    return context.redirect("/scenarios", redirectSeeOtherStatus);
   });
 
   app.post("/session/start", async (context) => {

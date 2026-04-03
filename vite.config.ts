@@ -34,6 +34,7 @@ export default defineConfig({
       // Allow async/await because async test code conflicts with
       // `promise-function-async` otherwise.
       "no-async-await": "off",
+      "require-await": "off",
       "no-await-in-loop": "off",
       "max-classes-per-file": "off",
       "max-lines-per-function": "off",
@@ -90,6 +91,7 @@ export default defineConfig({
       "unicorn/explicit-length-check": "off",
       "unicorn/no-array-callback-reference": "off",
       "unicorn/no-process-exit": "off",
+      "unicorn/no-useless-undefined": "off",
       "unicorn/prefer-global-this": "off",
       "unicorn/no-null": "off",
       "unicorn/prefer-top-level-await": "off",
@@ -98,6 +100,7 @@ export default defineConfig({
       "typescript/explicit-module-boundary-types": "off",
       "typescript/no-require-imports": "off",
       "typescript/explicit-function-return-type": "off",
+      "typescript/promise-function-async": "off",
       "typescript/no-var-requires": "off",
       "typescript/require-await": "off",
 

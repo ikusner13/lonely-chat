@@ -4,7 +4,12 @@ import { BotId, BotRecord } from "../bots/bot-record";
 import { BotId as PlatformBotId, ChatUsername } from "../platforms/Services/platform-adapter";
 import { SessionId } from "../sessions/Services/session-service";
 import { SessionMessageId, SessionMessageRecord } from "../sessions/session-message-record";
-import { BotSpeakerState, selectSpeakers } from "./mention-response";
+import {
+  BotSpeakerState,
+  calculateResponseDelay,
+  selectSilenceBreaker,
+  selectSpeakers,
+} from "./mention-response";
 
 const now = Date.UTC(2026, 3, 3, 0, 0, 0);
 
@@ -167,5 +172,67 @@ describe("speaker selection", () => {
       [echo.id, "thread"],
       [pixel.id, "talkativeness"],
     ]);
+  });
+
+  it("calculates per-trigger delays within the expected ranges", () => {
+    expect(
+      calculateResponseDelay("mention", {
+        baseDelayRoll: () => 0,
+      }),
+    ).toBe(1000);
+    expect(
+      calculateResponseDelay("thread", {
+        baseDelayRoll: () => 1,
+      }),
+    ).toBe(4000);
+    expect(
+      calculateResponseDelay("talkativeness", {
+        baseDelayRoll: () => 0,
+      }),
+    ).toBe(2000);
+    expect(
+      calculateResponseDelay("silence", {
+        baseDelayRoll: () => 1,
+      }),
+    ).toBe(8000);
+  });
+
+  it("adds stagger delay for later selected speakers", () => {
+    expect(
+      calculateResponseDelay("mention", {
+        baseDelayRoll: () => 0,
+        selectionIndex: 2,
+        staggerDelayRoll: () => 0,
+      }),
+    ).toBe(2000);
+  });
+
+  it("picks the highest-talkativeness eligible silence-breaker bot", () => {
+    const pixel = makeBot({
+      talkativeness: 55,
+    });
+    const echo = makeBot({
+      displayName: "Echo",
+      id: BotId.makeUnsafe("bot-echo"),
+      name: "echo",
+      talkativeness: 85,
+    });
+    const nova = makeBot({
+      displayName: "Nova",
+      id: BotId.makeUnsafe("bot-nova"),
+      name: "nova",
+      talkativeness: 95,
+    });
+
+    expect(
+      selectSilenceBreaker([pixel, echo, nova], {
+        botStates: [
+          makeBotState(nova, {
+            cooldownUntil: now + 1000,
+          }),
+        ],
+        now,
+      })?.id,
+    ).toBe(echo.id);
   });
 });

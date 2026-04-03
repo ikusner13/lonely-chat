@@ -12,9 +12,31 @@ const consecutiveMessageLimit = 3;
 const threadContinuationThreshold = 0.4;
 const baseCooldownMs = 5000;
 const consecutiveCooldownMs = 2000;
+const mentionDelayRange = {
+  max: 3000,
+  min: 1000,
+} as const;
+const threadDelayRange = {
+  max: 4000,
+  min: 1000,
+} as const;
+const voluntaryDelayRange = {
+  max: 6000,
+  min: 2000,
+} as const;
+const silenceDelayRange = {
+  max: 8000,
+  min: 3000,
+} as const;
+const staggerDelayRange = {
+  max: 1500,
+  min: 500,
+} as const;
 
 export const SpeakerSelectionReason = Schema.Literals(["mention", "thread", "talkativeness"]);
 export type SpeakerSelectionReason = typeof SpeakerSelectionReason.Type;
+export const ResponseTrigger = Schema.Literals(["mention", "thread", "talkativeness", "silence"]);
+export type ResponseTrigger = typeof ResponseTrigger.Type;
 
 export class BotSpeakerState extends Schema.Class("BotSpeakerState")({
   botId: BotId,
@@ -34,6 +56,12 @@ interface SpeakerSelectionOptions {
   readonly recentMessages?: readonly SessionMessageRecord[];
   readonly talkativenessRoll?: (bot: BotRecord) => number;
   readonly threadRoll?: (bot: BotRecord) => number;
+}
+
+interface ResponseDelayOptions {
+  readonly baseDelayRoll?: () => number;
+  readonly selectionIndex?: number;
+  readonly staggerDelayRoll?: () => number;
 }
 
 const escapeRegExp = (value: string): string => value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -115,7 +143,10 @@ const selectionPriority = (reason: SpeakerSelectionReason): number => {
   }
 };
 
-const isEligibleByState = (
+const interpolateDelay = (minimumDelayMs: number, maximumDelayMs: number, roll: number): number =>
+  minimumDelayMs + Math.round((maximumDelayMs - minimumDelayMs) * Math.min(Math.max(roll, 0), 1));
+
+export const isEligibleByState = (
   bot: BotRecord,
   stateMap: ReadonlyMap<BotSpeakerState["botId"], BotSpeakerState>,
   now: number,
@@ -127,6 +158,75 @@ const isEligibleByState = (
   }
 
   return botState.consecutiveCount < consecutiveMessageLimit && botState.cooldownUntil <= now;
+};
+
+export const isEligibleSpeaker = (
+  bot: BotRecord,
+  botStates: readonly BotSpeakerState[],
+  now: number,
+): boolean => isEligibleByState(bot, makeStateMap(botStates), now);
+
+const delayRangeForTrigger = (
+  trigger: ResponseTrigger,
+): Readonly<{
+  readonly max: number;
+  readonly min: number;
+}> => {
+  switch (trigger) {
+    case "mention": {
+      return mentionDelayRange;
+    }
+    case "thread": {
+      return threadDelayRange;
+    }
+    case "talkativeness": {
+      return voluntaryDelayRange;
+    }
+    case "silence": {
+      return silenceDelayRange;
+    }
+    default: {
+      return silenceDelayRange;
+    }
+  }
+};
+
+export const calculateResponseDelay = (
+  trigger: ResponseTrigger,
+  options: ResponseDelayOptions = {},
+): number => {
+  const baseDelayRoll = options.baseDelayRoll ?? (() => Math.random());
+  const staggerDelayRoll = options.staggerDelayRoll ?? (() => Math.random());
+  const baseDelayRange = delayRangeForTrigger(trigger);
+  const baseDelay = interpolateDelay(baseDelayRange.min, baseDelayRange.max, baseDelayRoll());
+  const selectionIndex = options.selectionIndex ?? 0;
+
+  if (selectionIndex <= 0) {
+    return baseDelay;
+  }
+
+  const staggerDelay = interpolateDelay(
+    staggerDelayRange.min,
+    staggerDelayRange.max,
+    staggerDelayRoll(),
+  );
+
+  return baseDelay + staggerDelay * selectionIndex;
+};
+
+export const selectSilenceBreaker = (
+  bots: readonly BotRecord[],
+  options: Pick<SpeakerSelectionOptions, "botStates" | "now"> = {},
+): BotRecord | null => {
+  const enabledBots = bots.filter((bot) => bot.enabled);
+  const stateMap = makeStateMap(options.botStates ?? []);
+  const now = options.now ?? Date.now();
+  const eligibleBots = enabledBots.filter((bot) => isEligibleByState(bot, stateMap, now));
+  const [selectedBot] = eligibleBots.toSorted(
+    (left, right) => right.talkativeness - left.talkativeness,
+  );
+
+  return selectedBot ?? null;
 };
 
 export const selectSpeakers = (
@@ -253,6 +353,25 @@ export const makeMentionResponseRequest = (
     ...buildExampleMessages(bot),
     {
       content: formatIncomingMessage(message),
+      role: "user",
+    },
+  ],
+  model: AiModelName.makeUnsafe(bot.model),
+});
+
+export const makeSilenceBreakerRequest = (
+  bot: BotRecord,
+  platform: PlatformName,
+): AiGenerateRequest => ({
+  botName: BotName.makeUnsafe(bot.displayName),
+  messages: [
+    {
+      content: buildSystemPrompt(bot, platform),
+      role: "system",
+    },
+    ...buildExampleMessages(bot),
+    {
+      content: "Start a new conversation topic naturally.",
       role: "user",
     },
   ],

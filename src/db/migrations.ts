@@ -7,6 +7,7 @@ const createSettingsMigrationId = 1;
 const createSessionsMigrationId = 2;
 const createBotsMigrationId = 3;
 const createSessionMessagesMigrationId = 4;
+const createScenariosMigrationId = 5;
 
 const createSettingsTable = Effect.gen(function* createSettingsTable() {
   const sql = yield* SqlClient.SqlClient;
@@ -84,11 +85,31 @@ const createSessionMessagesTable = Effect.gen(function* createSessionMessagesTab
   )`;
 });
 
+const createScenariosTable = Effect.gen(function* createScenariosTable() {
+  const sql = yield* SqlClient.SqlClient;
+
+  yield* sql`CREATE TABLE IF NOT EXISTS scenarios (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    participants TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    trigger_config TEXT NOT NULL,
+    steps TEXT NOT NULL,
+    duration_seconds INTEGER,
+    enabled INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`;
+});
+
 const migrationEntries = [
   [createSettingsMigrationId, "create_settings", createSettingsTable],
   [createSessionsMigrationId, "create_sessions", createSessionsTable],
   [createBotsMigrationId, "create_bots", createBotsTable],
   [createSessionMessagesMigrationId, "create_session_messages", createSessionMessagesTable],
+  [createScenariosMigrationId, "create_scenarios", createScenariosTable],
 ] as const;
 
 export const makeMigrationLoader = (): ReturnType<typeof SqliteMigrator.fromRecord> =>
