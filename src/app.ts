@@ -637,15 +637,16 @@ export const makeAppRuntime = (
   dbPath: string,
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
   const databaseLayer = makeDatabaseLayer(dbPath);
-  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provideMerge(MockPlatformAdapterLive));
+  const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const sessionServiceLayer = SessionServiceLive.pipe(
+    Layer.provide(MockPlatformAdapterLive),
+    Layer.provide(FakeAiClientLive),
+    Layer.provide(botServiceLayer),
+    Layer.provide(databaseLayer),
+  );
 
   return ManagedRuntime.make(
-    Layer.empty.pipe(
-      Layer.provideMerge(FakeAiClientLive),
-      Layer.provideMerge(sessionServiceLayer),
-      Layer.provideMerge(BotServiceLive),
-      Layer.provide(databaseLayer),
-    ),
+    Layer.mergeAll(FakeAiClientLive, botServiceLayer, sessionServiceLayer),
   );
 };
 

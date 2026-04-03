@@ -9,13 +9,24 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import type { AiGenerationError } from "../../ai/ai-generation-error";
+import { AiClient } from "../../ai/Services/ai-client";
+import { BotService } from "../../bots/Services/bot-service";
 import {
-  BotId,
+  makeMentionResponseRequest,
+  selectSingleMentionedBot,
+} from "../../orchestration/mention-response";
+import {
+  BotId as PlatformBotId,
   ChannelName,
   ChatUsername,
   PlatformAdapter,
 } from "../../platforms/Services/platform-adapter";
-import type { ChatMessage } from "../../platforms/Services/platform-adapter";
+import type {
+  ChatMessage,
+  PlatformConnectionError,
+  PlatformSendError,
+} from "../../platforms/Services/platform-adapter";
 import { SessionService, SessionId } from "../Services/session-service";
 import type {
   SessionEndReason,
@@ -56,7 +67,10 @@ interface SessionMessageRow {
   readonly username: string;
 }
 
-type MessageListenerFiber = Fiber.Fiber<void, SqlError>;
+type MessageListenerFiber = Fiber.Fiber<
+  void,
+  AiGenerationError | PlatformConnectionError | PlatformSendError | SqlError
+>;
 
 const makeSessionRecord = (row: SessionRow): SessionRecord =>
   new SessionRecord({
@@ -102,7 +116,7 @@ const makeSessionMessageRecord = (
 
 const makeStoredSessionMessageRecord = (row: SessionMessageRow): SessionMessageRecord =>
   new SessionMessageRecord({
-    botId: row.bot_id === null ? null : BotId.makeUnsafe(row.bot_id),
+    botId: row.bot_id === null ? null : PlatformBotId.makeUnsafe(row.bot_id),
     content: row.content,
     id: SessionMessageId.makeUnsafe(row.id),
     isBot: row.is_bot === 1,
@@ -118,6 +132,8 @@ export const SessionServiceLive = Layer.effect(
   SessionService,
   Effect.acquireRelease(
     Effect.gen(function* makeSessionService() {
+      const aiClient = yield* AiClient;
+      const botService = yield* BotService;
       const sql = yield* SqlClient.SqlClient;
       const platformAdapter = yield* PlatformAdapter;
       const serviceScope = yield* Scope.make();
@@ -171,6 +187,33 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const maybeRespondToMention = Effect.fn("SessionService.maybeRespondToMention")(
+        function* maybeRespondToMentionEffect(session: SessionRecord, message: ChatMessage) {
+          if (message.direction !== "incoming") {
+            return;
+          }
+
+          const mentionedBot = selectSingleMentionedBot(message.text, yield* botService.listBots());
+
+          if (mentionedBot === null) {
+            return;
+          }
+
+          yield* platformAdapter.connect({
+            botId: PlatformBotId.makeUnsafe(mentionedBot.id),
+            channel: session.channel,
+            platform: session.platform,
+            username: ChatUsername.makeUnsafe(mentionedBot.name),
+          });
+
+          const response = yield* aiClient.generateText(
+            makeMentionResponseRequest(mentionedBot, message),
+          );
+
+          yield* platformAdapter.sendMessage(session.channel, response.text);
+        },
+      );
+
       const startMessageListener = Effect.fn("SessionService.startMessageListener")(
         function* startMessageListenerEffect(session: SessionRecord) {
           const existingListener = yield* Ref.get(messageListenerRef);
@@ -180,7 +223,12 @@ export const SessionServiceLive = Layer.effect(
           }
 
           const messageListener = yield* platformAdapter.listenChat(session.channel).pipe(
-            Stream.runForEach((message) => persistMessage(session.id, message)),
+            Stream.runForEach((message) =>
+              Effect.gen(function* handleSessionMessageEffect() {
+                yield* persistMessage(session.id, message);
+                yield* maybeRespondToMention(session, message);
+              }),
+            ),
             Effect.forkIn(serviceScope),
           );
 

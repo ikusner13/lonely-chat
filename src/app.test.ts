@@ -83,17 +83,20 @@ const createTestRuntimeWithMockPlatform = (dbPath: string) =>
   Effect.acquireRelease(
     Effect.gen(function* createRuntimeWithMockPlatformEffect() {
       const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const databaseLayer = makeDatabaseLayer(dbPath);
       const platformLayer = Layer.succeed(
         PlatformAdapter,
         PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
       );
+      const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+      const sessionServiceLayer = SessionServiceLive.pipe(
+        Layer.provide(platformLayer),
+        Layer.provide(FakeAiClientLive),
+        Layer.provide(botServiceLayer),
+        Layer.provide(databaseLayer),
+      );
       const runtime = ManagedRuntime.make(
-        Layer.empty.pipe(
-          Layer.provideMerge(FakeAiClientLive),
-          Layer.provideMerge(SessionServiceLive.pipe(Layer.provideMerge(platformLayer))),
-          Layer.provideMerge(BotServiceLive),
-          Layer.provide(makeDatabaseLayer(dbPath)),
-        ),
+        Layer.mergeAll(FakeAiClientLive, botServiceLayer, sessionServiceLayer),
       ) as ReturnType<typeof makeAppRuntime>;
 
       return {

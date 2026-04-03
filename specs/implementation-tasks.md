@@ -83,7 +83,7 @@ Use it with:
 - Spec inputs: `specs/ui.md`, `specs/platforms.md`, `specs/technical-effect.md`
 - Verify: stream bridge tests, live chat UI test, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-07: Single-bot mention response loop
+### [x] VS-07: Single-bot mention response loop
 
 - Depends on: `VS-03`, `VS-05`, `TB-03`
 - Outcome: When a chat message mentions one enabled bot, that bot generates one response through the fake AI client and sends it back through the mock adapter.

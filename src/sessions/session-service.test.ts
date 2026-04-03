@@ -8,6 +8,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { FakeAiClientLive, makeFakeAiClient } from "../ai/Layers/fake-ai-client";
+import { AiClient } from "../ai/Services/ai-client";
+import { BotId as PersistedBotId, BotRecord } from "../bots/bot-record";
+import { BotServiceLive } from "../bots/Layers/bot-service";
 import { makeDatabaseLayer } from "../db/database";
 import {
   MockPlatformAdapterLive,
@@ -48,6 +52,33 @@ const mockBot: BotConnection = {
   platform: "mock",
   username: ChatUsername.makeUnsafe("lonely-bot"),
 };
+
+const makeStoredBot = (): BotRecord =>
+  new BotRecord({
+    createdAt: "2026-04-03T00:00:00.000Z",
+    description: "a durable test bot",
+    displayName: "Pixel",
+    enabled: true,
+    exampleMessages: ["first line", "second line", "third line"],
+    fallbackModels: ["openrouter/fallback-model"],
+    firstMessage: null,
+    id: PersistedBotId.makeUnsafe("bot-1"),
+    maxTokens: 180,
+    model: "openrouter/mock-model",
+    name: "pixel",
+    personality: "dry humor",
+    platform: "twitch",
+    postHistoryPrompt: null,
+    responseLength: {
+      max: 12,
+      min: 3,
+    },
+    systemPrompt: null,
+    talkativeness: 65,
+    temperature: 0.8,
+    updatedAt: "2026-04-03T00:00:00.000Z",
+    vocabularyRules: ["keep it short"],
+  });
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -101,7 +132,7 @@ const insertStoredBot = (dbPath: string, bot: BotConnection): Effect.Effect<void
     dbPath,
     Effect.gen(function* insertStoredBotRow() {
       const sql = yield* SqlClient.SqlClient;
-      const timestamp = "2026-04-03T00:00:00.000Z";
+      const storedBot = makeStoredBot();
 
       yield* sql`INSERT INTO bots (
           id,
@@ -128,9 +159,9 @@ const insertStoredBot = (dbPath: string, bot: BotConnection): Effect.Effect<void
         )
         VALUES (
           ${bot.botId},
-          ${bot.username},
-          ${bot.username},
-          ${bot.platform},
+          ${storedBot.name},
+          ${storedBot.displayName},
+          ${storedBot.platform},
           ${"openrouter/mock-model"},
           ${JSON.stringify(["openrouter/fallback-model"])},
           ${0.8},
@@ -146,8 +177,8 @@ const insertStoredBot = (dbPath: string, bot: BotConnection): Effect.Effect<void
           ${65},
           ${null},
           ${1},
-          ${timestamp},
-          ${timestamp}
+          ${storedBot.createdAt},
+          ${storedBot.updatedAt}
         )`;
     }),
   );
@@ -169,14 +200,28 @@ const waitForStoredSessionMessages = (
     return yield* waitForStoredSessionMessages(dbPath, expectedCount, remainingAttempts - 1);
   });
 
+const makeSessionTestLayer = (
+  dbPath: string,
+  platformLayer: Layer.Layer<PlatformAdapter>,
+  aiLayer: Layer.Layer<AiClient> = FakeAiClientLive,
+) => {
+  const databaseLayer = makeDatabaseLayer(dbPath);
+  const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const sessionServiceLayer = SessionServiceLive.pipe(
+    Layer.provide(platformLayer),
+    Layer.provide(aiLayer),
+    Layer.provide(botServiceLayer),
+    Layer.provide(databaseLayer),
+  );
+
+  return Layer.mergeAll(aiLayer, botServiceLayer, sessionServiceLayer);
+};
+
 describe("session service", () => {
   it.effect("persists the mock session lifecycle", () =>
     Effect.gen(function* persistsTheMockSessionLifecycle() {
       const dbPath = yield* createDatabasePath;
-      const sessionLayer = SessionServiceLive.pipe(
-        Layer.provideMerge(MockPlatformAdapterLive),
-        Layer.provide(makeDatabaseLayer(dbPath)),
-      );
+      const sessionLayer = makeSessionTestLayer(dbPath, MockPlatformAdapterLive);
 
       const endedSession = yield* Effect.gen(function* exerciseSessionLifecycle() {
         const sessionService = yield* SessionService;
@@ -223,10 +268,7 @@ describe("session service", () => {
         PlatformAdapter,
         PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
       );
-      const sessionLayer = SessionServiceLive.pipe(
-        Layer.provideMerge(platformLayer),
-        Layer.provideMerge(makeDatabaseLayer(dbPath)),
-      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
 
       const streamedMessage = yield* Effect.gen(function* exerciseLiveMessageBridge() {
         const sessionService = yield* SessionService;
@@ -279,10 +321,7 @@ describe("session service", () => {
         PlatformAdapter,
         PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
       );
-      const sessionLayer = SessionServiceLive.pipe(
-        Layer.provideMerge(platformLayer),
-        Layer.provideMerge(makeDatabaseLayer(dbPath)),
-      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
 
       const session = yield* Effect.gen(function* exerciseSessionMessagePersistence() {
         const sessionService = yield* SessionService;
@@ -341,6 +380,52 @@ describe("session service", () => {
           status: "ended",
         },
       ]);
+    }),
+  );
+
+  it.effect("responds once when one enabled bot is mentioned", () =>
+    Effect.gen(function* respondsOnceWhenOneEnabledBotIsMentioned() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, mockBot);
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      yield* Effect.gen(function* exerciseMentionResponseLoop() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel you there?",
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        });
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
+          {
+            botId: mockBot.botId,
+            channel: mockBot.channel,
+            direction: "outgoing",
+            platform: "mock",
+            text: "Pixel: [fake:openrouter/mock-model] [external] viewer-1: hey @pixel you there?",
+            username: ChatUsername.makeUnsafe("pixel"),
+          },
+        ]);
+        expect(yield* fakeAiClient.getRequests).toEqual([
+          expect.objectContaining({
+            botName: "Pixel",
+            model: "openrouter/mock-model",
+          }),
+        ]);
+      }).pipe(Effect.provide(appLayer));
     }),
   );
 });
