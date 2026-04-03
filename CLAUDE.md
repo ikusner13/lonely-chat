@@ -1,216 +1,122 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-**Lonely Chat** - AI-powered Twitch chat bots to solve loneliness by creating engaging, personality-driven conversations in stream chats.
+**Lonely Chat** -- AI-powered Twitch chat bots. Multiple bots with distinct personalities join chat, respond to @mentions and randomly participate, with a moderator bot that can timeout users. Built on Effect v4.
 
-### Core Features
+## Stack
 
-- AI-powered bots with distinct personalities that engage naturally in Twitch chat
-- Uses Vercel AI SDK v5 with OpenRouter for diverse model support
-- Multiple bots that participate as regular chat members
-- Single chat listener reads all messages; bots are write-only
-- Bots respond to mentions (@botname) and randomly participate (25% chance)
-- Includes moderation bot with timeout capabilities
-- Hot-reload configuration without disconnecting bots
-- Unified auth dashboard for token management
+- **Effect**: v4 (4.0.0-beta.43) -- ServiceMap.Service, Layer, PubSub, Queue, Ref, Schema, SQL
+- **Toolchain**: Vite+ (oxlint + oxfmt), all categories enabled, type-aware
+- **Package manager**: pnpm
+- **Twitch**: Twurple (auth, chat, api, eventsub-ws)
+- **AI**: Vercel AI SDK v5 + OpenRouter provider
+- **HTTP**: Hono (auth dashboard/API) bridged via ManagedRuntime
+- **DB**: SQLite via @effect/sql-sqlite-bun
+- **Config**: TOML with hot-reload (SIGHUP)
 
-## Key Technologies
+## Commands
 
-- **Runtime**: Bun (v1.2.19+)
-- **Language**: TypeScript
-- **Effect**: Effect v4 (4.0.0-beta.43) — services, layers, PubSub, Queue, Schema, SQL
-- **Framework**: Hono (for auth dashboard/API)
-- **Twitch Integration**: Twurple (auth, chat, eventsub)
-- **AI Framework**: Vercel AI SDK v5 with OpenRouter provider
-- **AI Models**: Access to multiple models (Llama, Claude, GPT-4, Gemini, DeepSeek)
-- **Configuration**: TOML format with hot-reload support
-- **Build Tool**: tsdown for production builds
-- **Container**: Docker with multi-stage builds
-
-<!-- effect-solutions:start -->
-
-## Effect Best Practices
-
-**IMPORTANT:** Always consult effect-solutions before writing Effect code.
-
-1. Run `effect-solutions list` to see available guides
-2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
-3. Search `.references/effect-smol` for real implementations (local clone of Effect v4 source)
-
-Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
-
-Never guess at Effect patterns - check the guide first.
-
-<!-- effect-solutions:end -->
+```bash
+vp check        # format + lint + typecheck (USE THIS for validation)
+vp lint         # lint only (type-aware enabled in config)
+vp fmt          # format only
+vp dev          # dev server
+vp pack         # production build
+vp test         # run tests
+```
 
 ## Project Structure
 
-### Main Application (`/main`)
-
-- `/main/src/index.ts` - Entry point with signal handling for config reload
-- `/main/src/app.ts` - Application coordinator that wires all services
-- `/main/src/services/`
-  - `stream.service.ts` - Stream status monitoring via EventSub WebSocket
-  - `chat-listener.service.ts` - Single source for reading all chat messages
-  - `chat-message-window.ts` - Sliding window of chat context (10 messages, 10 min expiry)
-  - `bot-response-coordinator.ts` - Decides which bots respond to messages
-  - `ai.service.ts` - AI integration using Vercel AI SDK and OpenRouter
-  - `chatbot-queue.ts` - Manages response timing and rate limiting
-  - `chatbot.service.ts` - Write-only Twitch chat clients for each bot
-  - `moderatorbot.service.ts` - Special bot with moderation capabilities
-  - `bot-manager.ts` - Orchestrates bot lifecycle and connections
-  - `bot-factory.ts` - Creates bot instances based on configuration
-  - `config-manager.ts` - Handles bot configuration with hot-reload support
-
-### Auth Server (`/auth`)
-
-- `/auth/src/index.ts` - Auth server entry with localtunnel for OAuth
-- `/auth/src/app.tsx` - Hono app with dashboard and API routes
-- `/auth/src/components/` - React-like components for dashboard UI
-- `/auth/src/routes/` - OAuth flow handlers for different token types
-- `/auth/src/lib/oauth.ts` - Twitch OAuth implementation
-
-### Shared Code (`/shared`)
-
-- `env.ts` - Environment variable validation with zod
-- `logger.ts` - Pino logger factory
-- `sqlite-token-store.ts` - SQLite-based token persistence
-- `token.service.ts` - Token management and validation
-
-### Configuration (`/config`)
-
-- `bots.toml` - Bot configuration (personalities, models, settings)
-- `bots.toml.example` - Example configuration with 4 sample bots
-
-### Docker Setup
-
-- `docker-compose.local.yml` - Local development setup
-- `docker-compose.production.yml` - Production deployment with ghcr.io images
-- `main/Dockerfile` - Multi-stage build for main app
-- `auth/Dockerfile` - Multi-stage build for auth server
-
-## Essential Commands
-
-### Development
-
-```bash
-# Install dependencies
-bun install
-
-# Start auth dashboard (RECOMMENDED for token management)
-bun run auth
-# Opens http://localhost:8080 with tunnel for OAuth callbacks
-
-# Run the main application
-bun run dev        # Normal mode
-bun run dev:hot    # Hot reload mode
-
-# Test AI responses
-bun run playground
+```
+src/                           # all source code
+  index.ts                     # BunRuntime.runMain(Layer.launch(MainLive))
+  AppConfig.ts                 # Effect Config layer (env vars)
+  Errors.ts                    # Schema.TaggedErrorClass errors
+  Pubsub.ts                   # PubSub tags: StreamEventPubSub, ChatMessagePubSub
+  MainLive.ts                  # top-level layer composition
+  config/                      # bot config schema + TOML loader
+  db/                          # SQLite layer + token repo
+  auth/                        # TokenManager + OAuth service
+  twitch/                      # stream monitor, chat listener, bot clients
+  bot/                         # bot manager, response coordinator, queue, message window
+  ai/                          # AI service (generateText/generateObject)
+  http/                        # Hono server + routes + JSX components
+.references/                   # Effect v4 reference repos (not committed)
 ```
 
-### Code Quality
+## Effect v4 Patterns
 
-```bash
-bun run type-check  # TypeScript validation
-bun run lint        # Run Biome linter
-bun run format      # Format code with Biome
+Always run `effect-solutions show <topic>` before writing Effect code. Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
+
+<!-- effect-solutions:start -->
+
+### Service definition
+
+```typescript
+class Foo extends ServiceMap.Service<
+  Foo,
+  {
+    readonly bar: (x: string) => Effect.Effect<number, FooError>;
+  }
+>()("lonely-chat/Foo") {
+  static readonly layer = Layer.effect(
+    Foo,
+    Effect.gen(function* () {
+      const bar = Effect.fn("Foo.bar")(function* (x: string) {
+        // ...
+      });
+      return Foo.of({ bar });
+    }),
+  );
+}
 ```
 
-### Building & Deployment
+### Errors
 
-```bash
-# Build for production
-bun run build       # Builds both main and auth apps
-
-# Docker commands
-bun run docker:build    # Build Docker images
-bun run docker:up       # Start services
-bun run docker:down     # Stop services
-bun run docker:logs     # View logs
-bun run docker:restart  # Restart services
-bun run docker:shell    # Access container shell
+```typescript
+class FooError extends Schema.TaggedErrorClass<FooError>()("FooError", {
+  cause: Schema.optional(Schema.Defect),
+}) {}
 ```
 
-## Architecture Notes
+### Layer composition
 
-### Message Flow
+```typescript
+const MainLive = Layer.empty.pipe(
+  Layer.provideMerge(ServiceALive),
+  Layer.provideMerge(ServiceBLive),
+  // ...
+);
+```
 
-1. **StreamService** monitors stream status via EventSub WebSocket
-2. **ChatListenerService** reads ALL chat messages (single source of truth)
-3. **ChatMessageWindow** maintains sliding context window for AI
-4. **BotResponseCoordinator** decides which bots should respond
-5. **AIService** generates responses using bot personality + chat context
-6. **ChatbotQueue** schedules responses with natural delays (1-3 sec)
-7. **ChatbotService** instances send messages (write-only)
+### Key v4 differences from v3
 
-### Service Lifecycle
+- `ServiceMap.Service` not `Context.Tag`
+- `Effect.fn("name")` for named functions
+- `Effect.forkChild` (was `fork`), `Effect.forkDetach` (was `forkDaemon`)
+- `Effect.catch` (was `catchAll`), `Effect.catchCause` (was `catchAllCause`)
+- `Ref.get(ref)` / `Ref.set(ref, val)` -- no more `yield* ref`
+- `PubSub.bounded({ capacity })` + `Stream.fromPubSub` for subscriptions
+- `Schema.TaggedErrorClass` (was `Schema.TaggedError`)
 
-- Services are created but NOT connected on app start
-- StreamService checks if stream is already online
-- When stream online: ChatListener starts, all bots connect
-- When stream offline: ChatListener stops, all bots disconnect, queue clears
-- Config reload (SIGHUP): Updates bot settings without disconnecting
+<!-- effect-solutions:end -->
 
-### Bot Types
+## Effect v4 Reference Repos
 
-- **Regular Bots**: Write-only, respond to mentions and participate randomly
-- **Moderator Bot**: Special bot with timeout capabilities, sends confirmation messages
+Local clones in `.references/` for searching real implementations:
 
-### AI Integration
+- `.references/effect-smol/ai-docs/` -- canonical examples (services, layers, PubSub, HTTP, Schema)
+- `.references/effect-smol/migration/` -- v3 to v4 migration guides
+- `.references/opencode/packages/opencode/src/` -- large Effect v4 app (ServiceMap.Service, ManagedRuntime+Hono, PubSub, Effect.fn)
+- `.references/t3code/apps/server/src/` -- Effect v4 server (Layer.provideMerge, Queue+PubSub, HttpRouter)
 
-- Each bot has distinct personality, model, temperature settings
-- All bots receive the same chat context from ChatMessageWindow
-- Responses are generated based on bot personality + context
-- Fallback models ensure reliability if primary model fails
+## Architecture
 
-### Configuration Management
-
-- Hot-reload via SIGHUP signal (no downtime)
-- TOML format for easy editing
-- Validation before applying changes
-- Per-bot settings: name, role, model, temperature, maxTokens, systemPrompt
-- Optional: introMessage, fallbackModels
+See `PLAN.md` for full layer dependency graph, PubSub topology, and phased implementation plan.
 
 ## Environment Variables
 
-### Required
+Required: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_CHANNEL_ID`, `TWITCH_CHANNEL_NAME`, `OPENROUTER_KEY`
 
-```
-TWITCH_CLIENT_ID=your_client_id
-TWITCH_CLIENT_SECRET=your_client_secret
-TWITCH_CHANNEL_ID=your_channel_id
-TWITCH_CHANNEL_NAME=your_channel_name
-OPENROUTER_KEY=your_openrouter_api_key
-```
-
-### Optional
-
-```
-# Development only
-LOCALTUNNEL_SUBDOMAIN=stable-subdomain-for-oauth
-
-# Production paths
-BOT_CONFIG_PATH=/path/to/bots.toml
-TOKEN_DB_PATH=/path/to/tokens.db
-
-# Environment
-NODE_ENV=production
-PORT=8080  # For auth server
-
-# Logging
-LOG_LEVEL=info  # debug, info, warn, error
-```
-
-## Recent Updates
-
-- Migrated from JSON to SQLite for token storage
-- Added unified auth dashboard with React-like components
-- Implemented hot-reload configuration system
-- Docker multi-stage builds for smaller images
-- Improved error handling and logging throughout
-- Added support for multiple fallback AI models
-- Enhanced bot response coordination logic
+Optional: `TOKEN_DB_PATH` (default `./tokens.db`), `BOT_CONFIG_PATH` (default `./config/bots.toml`), `PORT` (default `8080`), `NODE_ENV`, `LOG_LEVEL`

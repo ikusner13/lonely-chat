@@ -6,12 +6,12 @@
   "emmet.showExpandedAbbreviation": "never",
   "cSpell.words": ["eventsub", "kimi", "moonshotai", "openrouter", "stickyman", "treeify"],
   "files.exclude": {
-    "**/.env": true,
-    "**/.env.local": true,
-    "**/.env.development.local": true,
-    "**/.env.test.local": true,
-    "**/.env.production.local": true,
-    "**/node_modules": true,
-    "**/.references": true
+    "**/.env": false,
+    "**/.env.local": false,
+    "**/.env.development.local": false,
+    "**/.env.test.local": false,
+    "**/.env.production.local": false,
+    "**/node_modules": false,
+    "**/.references": false
   }
 }
