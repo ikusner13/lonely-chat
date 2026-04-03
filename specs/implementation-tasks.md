@@ -53,7 +53,7 @@ Use it with:
 - Spec inputs: `specs/bots.md`, `specs/data.md`, `specs/ui.md`
 - Verify: form validation tests, create/update integration tests, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-03: Add advanced personality fields and schema validation
+### [x] VS-03: Add advanced personality fields and schema validation
 
 - Depends on: `VS-02`
 - Outcome: Example messages, vocabulary rules, response length, prompts, and fallback models are validated and stored.

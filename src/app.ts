@@ -4,15 +4,16 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import { Hono } from "hono";
 
 import {
-  makeBotCoreFieldFormValues,
-  makeBotRecordFromCoreFields,
-  makeEmptyBotCoreFieldFormValues,
-  parseBotCoreFields,
-} from "./bots/bot-core-fields";
+  BotEditorFormValues,
+  makeBotEditorFormValues,
+  makeBotRecordFromEditorFields,
+  makeEmptyBotEditorFormValues,
+  parseBotEditorFields,
+} from "./bots/bot-editor-fields";
 import { BotServiceLive } from "./bots/Layers/bot-service";
 import { BotService } from "./bots/Services/bot-service";
 import { BotId } from "./bots/bot-record";
-import type { BotCoreFieldFormErrors, BotCoreFieldFormValues } from "./bots/bot-core-fields";
+import type { BotEditorFormErrors } from "./bots/bot-editor-fields";
 import type { BotRecord } from "./bots/bot-record";
 import { getDatabasePath, makeDatabaseLayer } from "./db/database";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
@@ -24,8 +25,8 @@ const redirectSeeOtherStatus = 303;
 type AppServices = BotService | SessionService;
 
 interface BotFormState {
-  readonly errors: BotCoreFieldFormErrors;
-  readonly values: BotCoreFieldFormValues;
+  readonly errors: BotEditorFormErrors;
+  readonly values: BotEditorFormValues;
 }
 
 const formatActiveDuration = (startedAt: string): string => {
@@ -103,8 +104,8 @@ const escapeHtml = (value: string): string =>
     .replaceAll("'", "&#39;");
 
 const makeBotFormState = (
-  values: BotCoreFieldFormValues,
-  errors: BotCoreFieldFormErrors = {},
+  values: BotEditorFormValues,
+  errors: BotEditorFormErrors = {},
 ): BotFormState => ({
   errors,
   values,
@@ -118,25 +119,42 @@ const renderPlatformOptions = (platform: string): string => `<option value="twit
 }>twitch</option>
           <option value="kick"${platform === "kick" ? " selected" : ""}>kick</option>`;
 
+const renderTextInputField = (
+  name: string,
+  label: string,
+  value: string,
+  error?: string,
+  attributes = "",
+): string => `<label>
+            ${label}
+            <input name="${name}" type="text" value="${escapeHtml(value)}"${attributes} />
+          </label>
+          ${renderFieldError(error)}`;
+
+const renderTextareaField = (
+  name: string,
+  label: string,
+  value: string,
+  error?: string,
+  rows = 3,
+): string => `<label>
+            ${label}
+            <textarea name="${name}" rows="${rows}">${escapeHtml(value)}</textarea>
+          </label>
+          ${renderFieldError(error)}`;
+
 const renderBotEditorForm = (
   action: string,
   submitLabel: string,
   formState: BotFormState,
 ): string => `<form action="${action}" method="post">
-          <label>
-            Name
-            <input name="name" type="text" value="${escapeHtml(formState.values.name)}" />
-          </label>
-          ${renderFieldError(formState.errors.name)}
-          <label>
-            Display Name
-            <input
-              name="displayName"
-              type="text"
-              value="${escapeHtml(formState.values.displayName)}"
-            />
-          </label>
-          ${renderFieldError(formState.errors.displayName)}
+          ${renderTextInputField("name", "Name", formState.values.name, formState.errors.name)}
+          ${renderTextInputField(
+            "displayName",
+            "Display Name",
+            formState.values.displayName,
+            formState.errors.displayName,
+          )}
           <label>
             Platform
             <select name="platform">
@@ -144,11 +162,81 @@ const renderBotEditorForm = (
             </select>
           </label>
           ${renderFieldError(formState.errors.platform)}
-          <label>
-            Model
-            <input name="model" type="text" value="${escapeHtml(formState.values.model)}" />
-          </label>
-          ${renderFieldError(formState.errors.model)}
+          ${renderTextInputField("model", "Model", formState.values.model, formState.errors.model)}
+          ${renderTextareaField(
+            "fallbackModels",
+            "Fallback Models (one per line)",
+            formState.values.fallbackModels,
+          )}
+          ${renderTextInputField(
+            "temperature",
+            "Temperature",
+            formState.values.temperature,
+            formState.errors.temperature,
+            ' inputmode="decimal"',
+          )}
+          ${renderTextInputField(
+            "maxTokens",
+            "Max Tokens",
+            formState.values.maxTokens,
+            formState.errors.maxTokens,
+            ' inputmode="numeric"',
+          )}
+          ${renderTextareaField(
+            "personality",
+            "Personality",
+            formState.values.personality,
+            formState.errors.personality,
+            3,
+          )}
+          ${renderTextareaField(
+            "description",
+            "Description",
+            formState.values.description,
+            formState.errors.description,
+            4,
+          )}
+          ${renderTextareaField(
+            "exampleMessages",
+            "Example Messages (3-5, one per line)",
+            formState.values.exampleMessages,
+            formState.errors.exampleMessages,
+            5,
+          )}
+          ${renderTextareaField("firstMessage", "First Message", formState.values.firstMessage)}
+          ${renderTextareaField(
+            "postHistoryPrompt",
+            "Post-History Prompt",
+            formState.values.postHistoryPrompt,
+          )}
+          ${renderTextareaField(
+            "vocabularyRules",
+            "Vocabulary Rules (one per line)",
+            formState.values.vocabularyRules,
+            undefined,
+            4,
+          )}
+          ${renderTextareaField(
+            "systemPrompt",
+            "System Prompt Override",
+            formState.values.systemPrompt,
+            undefined,
+            5,
+          )}
+          ${renderTextInputField(
+            "responseLengthMin",
+            "Response Length Minimum",
+            formState.values.responseLengthMin,
+            formState.errors.responseLengthMin,
+            ' inputmode="numeric"',
+          )}
+          ${renderTextInputField(
+            "responseLengthMax",
+            "Response Length Maximum",
+            formState.values.responseLengthMax,
+            formState.errors.responseLengthMax,
+            ' inputmode="numeric"',
+          )}
           <label>
             Talkativeness
             <input
@@ -184,16 +272,17 @@ const renderBotList = (
       ${bots
         .map((bot) => {
           const editFormState =
-            editForms.get(bot.id) ?? makeBotFormState(makeBotCoreFieldFormValues(bot));
+            editForms.get(bot.id) ?? makeBotFormState(makeBotEditorFormValues(bot));
 
           return `<li>
             <strong>${escapeHtml(bot.displayName)}</strong> (@${escapeHtml(bot.name)})<br />
             Platform: ${escapeHtml(bot.platform)}<br />
             Model: ${escapeHtml(bot.model)}<br />
             Enabled: ${bot.enabled ? "yes" : "no"}<br />
-            Talkativeness: ${bot.talkativeness}
+            Talkativeness: ${bot.talkativeness}<br />
+            Response Length: ${bot.responseLength.min}-${bot.responseLength.max} words
             <details>
-              <summary>Edit core fields</summary>
+              <summary>Edit bot</summary>
               ${renderBotEditorForm(`/bots/${bot.id}`, "Save Bot", editFormState)}
             </details>
           </li>`;
@@ -273,14 +362,27 @@ const readStringFormField = (formData: FormData, fieldName: string): string => {
   return typeof value === "string" ? value : "";
 };
 
-const readBotFormValues = (formData: FormData): BotCoreFieldFormValues => ({
-  displayName: readStringFormField(formData, "displayName"),
-  enabled: formData.get("enabled") === "on",
-  model: readStringFormField(formData, "model"),
-  name: readStringFormField(formData, "name"),
-  platform: readStringFormField(formData, "platform"),
-  talkativeness: readStringFormField(formData, "talkativeness"),
-});
+const readBotFormValues = (formData: FormData): BotEditorFormValues =>
+  new BotEditorFormValues({
+    description: readStringFormField(formData, "description"),
+    displayName: readStringFormField(formData, "displayName"),
+    enabled: formData.get("enabled") === "on",
+    exampleMessages: readStringFormField(formData, "exampleMessages"),
+    fallbackModels: readStringFormField(formData, "fallbackModels"),
+    firstMessage: readStringFormField(formData, "firstMessage"),
+    maxTokens: readStringFormField(formData, "maxTokens"),
+    model: readStringFormField(formData, "model"),
+    name: readStringFormField(formData, "name"),
+    personality: readStringFormField(formData, "personality"),
+    platform: readStringFormField(formData, "platform"),
+    postHistoryPrompt: readStringFormField(formData, "postHistoryPrompt"),
+    responseLengthMax: readStringFormField(formData, "responseLengthMax"),
+    responseLengthMin: readStringFormField(formData, "responseLengthMin"),
+    systemPrompt: readStringFormField(formData, "systemPrompt"),
+    talkativeness: readStringFormField(formData, "talkativeness"),
+    temperature: readStringFormField(formData, "temperature"),
+    vocabularyRules: readStringFormField(formData, "vocabularyRules"),
+  });
 
 const serializeBot = (bot: BotRecord) => ({
   createdAt: bot.createdAt,
@@ -353,19 +455,15 @@ export const createApp = (
     const bots = await loadBots(runtime);
 
     return context.html(
-      renderBotManagerDocument(
-        bots,
-        makeBotFormState(makeEmptyBotCoreFieldFormValues()),
-        new Map(),
-      ),
+      renderBotManagerDocument(bots, makeBotFormState(makeEmptyBotEditorFormValues()), new Map()),
     );
   });
 
   app.post("/bots", async (context) => {
     const formValues = readBotFormValues(await context.req.formData());
-    const parsedForm = parseBotCoreFields(formValues);
+    const parsedForm = parseBotEditorFields(formValues);
 
-    if (parsedForm.coreFields === null) {
+    if (parsedForm.editorFields === null) {
       const bots = await loadBots(runtime);
 
       return context.html(
@@ -381,7 +479,7 @@ export const createApp = (
     await runtime.runPromise(
       BotService.use((botService) =>
         botService.createBot(
-          makeBotRecordFromCoreFields(parsedForm.coreFields, new Date().toISOString()),
+          makeBotRecordFromEditorFields(parsedForm.editorFields, new Date().toISOString()),
         ),
       ),
     );
@@ -398,20 +496,16 @@ export const createApp = (
     }
 
     const formValues = readBotFormValues(await context.req.formData());
-    const parsedForm = parseBotCoreFields(formValues);
+    const parsedForm = parseBotEditorFields(formValues);
 
-    if (parsedForm.coreFields === null) {
+    if (parsedForm.editorFields === null) {
       const bots = await loadBots(runtime);
       const editForms = new Map<string, BotFormState>([
         [existingBot.id, makeBotFormState(parsedForm.values, parsedForm.errors)],
       ]);
 
       return context.html(
-        renderBotManagerDocument(
-          bots,
-          makeBotFormState(makeEmptyBotCoreFieldFormValues()),
-          editForms,
-        ),
+        renderBotManagerDocument(bots, makeBotFormState(makeEmptyBotEditorFormValues()), editForms),
         badRequestStatus,
       );
     }
@@ -419,7 +513,11 @@ export const createApp = (
     await runtime.runPromise(
       BotService.use((botService) =>
         botService.updateBot(
-          makeBotRecordFromCoreFields(parsedForm.coreFields, new Date().toISOString(), existingBot),
+          makeBotRecordFromEditorFields(
+            parsedForm.editorFields,
+            new Date().toISOString(),
+            existingBot,
+          ),
         ),
       ),
     );

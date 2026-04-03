@@ -1,11 +1,12 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createApp, makeAppRuntime } from "./app";
-import type { BotCoreFieldFormValues } from "./bots/bot-core-fields";
+import { BotEditorFormValues } from "./bots/bot-editor-fields";
 import { BotRecord, BotId } from "./bots/bot-record";
 import { BotService } from "./bots/Services/bot-service";
 
@@ -13,6 +14,16 @@ const okStatus = 200;
 const seeOtherStatus = 303;
 const botCreatedAt = "2026-04-03T00:00:00.000Z";
 const botUpdatedAt = "2026-04-03T00:00:00.000Z";
+
+interface BotListApiResponse {
+  readonly bots: readonly unknown[];
+}
+
+const decodeBotListApiResponse: (input: unknown) => BotListApiResponse = Schema.decodeUnknownSync(
+  Schema.Struct({
+    bots: Schema.Array(Schema.Unknown),
+  }),
+);
 
 const createDatabasePath = Effect.acquireRelease(
   Effect.promise(async () => {
@@ -44,7 +55,7 @@ const makeTestBot = (overrides?: Partial<BotRecord>): BotRecord =>
     description: "Snarky speedrunner commentary.",
     displayName: "Pixel",
     enabled: true,
-    exampleMessages: ["clip it", "that split is cursed"],
+    exampleMessages: ["clip it", "that split is cursed", "chat is farming resets"],
     fallbackModels: ["openai/gpt-4.1-mini"],
     firstMessage: null,
     id: BotId.makeUnsafe("bot-pixel"),
@@ -66,6 +77,29 @@ const makeTestBot = (overrides?: Partial<BotRecord>): BotRecord =>
     ...overrides,
   });
 
+const makeValidBotFormValues = (overrides?: Partial<BotEditorFormValues>): BotEditorFormValues =>
+  new BotEditorFormValues({
+    description: "Snarky speedrunner commentary.",
+    displayName: "Pixel",
+    enabled: true,
+    exampleMessages: "clip it\nthat split is cursed\nchat is farming resets",
+    fallbackModels: "openai/gpt-4.1-mini\nanthropic/claude-3.7-sonnet",
+    firstMessage: "loading in",
+    maxTokens: "160",
+    model: "openai/gpt-5-mini",
+    name: "pixel_bot",
+    personality: "Fast, dry, and chat-native.",
+    platform: "twitch",
+    postHistoryPrompt: "Stay in character.",
+    responseLengthMax: "10",
+    responseLengthMin: "3",
+    systemPrompt: "",
+    talkativeness: "65",
+    temperature: "0.7",
+    vocabularyRules: "Never use emojis.\nNever apologize.",
+    ...overrides,
+  });
+
 const requestApp = (
   app: ReturnType<typeof createApp>,
   url: string,
@@ -80,14 +114,26 @@ const requestApp = (
 const requestBotForm = (
   app: ReturnType<typeof createApp>,
   url: string,
-  values: BotCoreFieldFormValues,
+  values: BotEditorFormValues,
 ): Effect.Effect<Response> => {
   const body = new URLSearchParams({
+    description: values.description,
     displayName: values.displayName,
+    exampleMessages: values.exampleMessages,
+    fallbackModels: values.fallbackModels,
+    firstMessage: values.firstMessage,
+    maxTokens: values.maxTokens,
     model: values.model,
     name: values.name,
+    personality: values.personality,
     platform: values.platform,
+    postHistoryPrompt: values.postHistoryPrompt,
+    responseLengthMax: values.responseLengthMax,
+    responseLengthMin: values.responseLengthMin,
+    systemPrompt: values.systemPrompt,
     talkativeness: values.talkativeness,
+    temperature: values.temperature,
+    vocabularyRules: values.vocabularyRules,
   });
 
   if (values.enabled) {
@@ -244,14 +290,7 @@ describe("app shell", () => {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
       const app = createApp(runtime);
-      let response = yield* requestBotForm(app, "http://localhost/bots", {
-        displayName: "Pixel",
-        enabled: true,
-        model: "openai/gpt-5-mini",
-        name: "pixel_bot",
-        platform: "twitch",
-        talkativeness: "65",
-      });
+      let response = yield* requestBotForm(app, "http://localhost/bots", makeValidBotFormValues());
 
       expect(response.status).toBe(seeOtherStatus);
 
@@ -268,7 +307,33 @@ describe("app shell", () => {
       expect(body).toContain("@pixel_bot");
       expect(body).toContain("Model: openai/gpt-5-mini");
       expect(body).toContain("Talkativeness: 65");
-      expect(body).toContain("Edit core fields");
+      expect(body).toContain("Response Length: 3-10 words");
+      expect(body).toContain("Edit bot");
+
+      response = yield* requestApp(app, "http://localhost/api/bots");
+      const apiBody = yield* Effect.promise(async (): Promise<BotListApiResponse> => {
+        const payload = await response.json();
+
+        return decodeBotListApiResponse(payload);
+      });
+
+      expect(apiBody.bots).toEqual([
+        expect.objectContaining({
+          description: "Snarky speedrunner commentary.",
+          exampleMessages: ["clip it", "that split is cursed", "chat is farming resets"],
+          fallbackModels: ["openai/gpt-4.1-mini", "anthropic/claude-3.7-sonnet"],
+          firstMessage: "loading in",
+          maxTokens: 160,
+          personality: "Fast, dry, and chat-native.",
+          postHistoryPrompt: "Stay in character.",
+          responseLength: {
+            max: 10,
+            min: 3,
+          },
+          temperature: 0.7,
+          vocabularyRules: ["Never use emojis.", "Never apologize."],
+        }),
+      ]);
     }),
   );
 
@@ -283,14 +348,30 @@ describe("app shell", () => {
         await createStoredBot(runtime, storedBot);
       });
 
-      let response = yield* requestBotForm(app, `http://localhost/bots/${storedBot.id}`, {
-        displayName: "Marble",
-        enabled: false,
-        model: "anthropic/claude-3.7-sonnet",
-        name: "marble_bot",
-        platform: "kick",
-        talkativeness: "12",
-      });
+      let response = yield* requestBotForm(
+        app,
+        `http://localhost/bots/${storedBot.id}`,
+        makeValidBotFormValues({
+          description: "Cool-headed late-night moderator.",
+          displayName: "Marble",
+          enabled: false,
+          exampleMessages: "calm down chat\nsave it for halftime\nmods are awake",
+          fallbackModels: "meta-llama/llama-3.1-8b-instruct:free",
+          firstMessage: "",
+          maxTokens: "96",
+          model: "anthropic/claude-3.7-sonnet",
+          name: "marble_bot",
+          personality: "Calm, sharp, and a little smug.",
+          platform: "kick",
+          postHistoryPrompt: "Keep it clipped and confident.",
+          responseLengthMax: "6",
+          responseLengthMin: "2",
+          systemPrompt: "You are Marble. Stay clipped.",
+          talkativeness: "12",
+          temperature: "1.1",
+          vocabularyRules: "Never hedge.\nNever use emojis.",
+        }),
+      );
 
       expect(response.status).toBe(seeOtherStatus);
 
@@ -308,6 +389,39 @@ describe("app shell", () => {
       expect(body).toContain("Model: anthropic/claude-3.7-sonnet");
       expect(body).toContain("Enabled: no");
       expect(body).toContain("Talkativeness: 12");
+      expect(body).toContain("Response Length: 2-6 words");
+
+      response = yield* requestApp(app, "http://localhost/api/bots");
+      const apiBody = yield* Effect.promise(async (): Promise<BotListApiResponse> => {
+        const payload = await response.json();
+
+        return decodeBotListApiResponse(payload);
+      });
+
+      expect(apiBody.bots).toEqual([
+        expect.objectContaining({
+          description: "Cool-headed late-night moderator.",
+          displayName: "Marble",
+          enabled: false,
+          exampleMessages: ["calm down chat", "save it for halftime", "mods are awake"],
+          fallbackModels: ["meta-llama/llama-3.1-8b-instruct:free"],
+          firstMessage: null,
+          maxTokens: 96,
+          model: "anthropic/claude-3.7-sonnet",
+          name: "marble_bot",
+          personality: "Calm, sharp, and a little smug.",
+          platform: "kick",
+          postHistoryPrompt: "Keep it clipped and confident.",
+          responseLength: {
+            max: 6,
+            min: 2,
+          },
+          systemPrompt: "You are Marble. Stay clipped.",
+          talkativeness: 12,
+          temperature: 1.1,
+          vocabularyRules: ["Never hedge.", "Never use emojis."],
+        }),
+      ]);
     }),
   );
 
@@ -317,14 +431,24 @@ describe("app shell", () => {
       const runtime = yield* createTestRuntime(dbPath);
       const app = createApp(runtime);
 
-      const response = yield* requestBotForm(app, "http://localhost/bots", {
-        displayName: "",
-        enabled: false,
-        model: "",
-        name: "   ",
-        platform: "youtube",
-        talkativeness: "101",
-      });
+      const response = yield* requestBotForm(
+        app,
+        "http://localhost/bots",
+        makeValidBotFormValues({
+          description: " ",
+          displayName: "",
+          exampleMessages: "one\ntwo",
+          maxTokens: "0",
+          model: "",
+          name: "   ",
+          personality: "",
+          platform: "youtube",
+          responseLengthMax: "2",
+          responseLengthMin: "5",
+          talkativeness: "101",
+          temperature: "3",
+        }),
+      );
       const body = yield* Effect.promise(async () => {
         const text = await response.text();
 
@@ -337,6 +461,12 @@ describe("app shell", () => {
       expect(body).toContain("Model is required.");
       expect(body).toContain("Platform must be twitch or kick.");
       expect(body).toContain("Talkativeness must be an integer between 0 and 100.");
+      expect(body).toContain("Description is required.");
+      expect(body).toContain("Personality is required.");
+      expect(body).toContain("Example messages must include 3 to 5 entries.");
+      expect(body).toContain("Temperature must be a number between 0 and 2.");
+      expect(body).toContain("Max tokens must be a positive integer.");
+      expect(body).toContain("Maximum response length must be greater than or equal to minimum.");
     }),
   );
 });
