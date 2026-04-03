@@ -1,7 +1,5 @@
 {
-  "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true,
-  "editor.formatOnSave": true,
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
   "editor.formatOnPaste": true,
   "emmet.showExpandedAbbreviation": "never",
   "cSpell.words": ["eventsub", "kimi", "moonshotai", "openrouter", "stickyman", "treeify"],
@@ -13,5 +11,12 @@
     "**/.env.production.local": false,
     "**/node_modules": false,
     "**/.references": false
+  },
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "oxc.fmt.configPath": "./vite.config.ts",
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "explicit"
   }
 }

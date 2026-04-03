@@ -23,7 +23,7 @@ Use it with:
 - Spec inputs: `specs/architecture.md`, `specs/data.md`, `specs/technical-effect.md`
 - Verify: DB boot/migration test, simple read/write integration test, `vp check`, targeted `vp test`
 
-### [ ] TB-03: Add mock platform adapter and fake AI client
+### [x] TB-03: Add mock platform adapter and fake AI client
 
 - Depends on: `TB-01`
 - Outcome: A mock adapter can emit and accept chat messages, and a fake AI client can return deterministic responses.

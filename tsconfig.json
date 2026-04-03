@@ -3,7 +3,7 @@
   "compilerOptions": {
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "target": "es2022",
+    "target": "esnext",
     "types": ["bun"],
     "allowJs": true,
     "resolveJsonModule": true,
@@ -16,7 +16,7 @@
     "noImplicitOverride": true,
     "module": "preserve",
     "noEmit": true,
-    "lib": ["es2022"],
+    "lib": ["esnext"],
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "noFallthroughCasesInSwitch": true,

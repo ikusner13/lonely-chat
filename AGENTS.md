@@ -19,6 +19,11 @@ vp pack         # production build
 vp run test     # run the repo's Bun-driven test command
 ```
 
+## Discovery Workflow
+
+- When answering questions that require searching many files, use subagents/explorers to parallelize codebase discovery.
+- Split exploration by area or hypothesis, then synthesize the results before answering.
+
 ## Implementation Workflow
 
 Use the implementation checklist as the source of truth:
