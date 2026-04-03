@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
+import * as SqliteMigrator from "@effect/sql-sqlite-node/SqliteMigrator";
 
 const createSettingsMigrationId = 1;
 const createSessionsMigrationId = 2;

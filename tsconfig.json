@@ -1,10 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
+  "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
     "esModuleInterop": true,
     "skipLibCheck": true,
     "target": "esnext",
-    "types": ["bun"],
+    "types": [],
     "allowJs": true,
     "resolveJsonModule": true,
     "moduleDetection": "force",
@@ -16,8 +17,7 @@
     "noImplicitOverride": true,
     "module": "preserve",
     "noEmit": true,
-    "lib": ["esnext"],
-    "jsx": "react-jsx",
+    "lib": ["esnext", "DOM", "DOM.Iterable"],
     "allowImportingTsExtensions": true,
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
@@ -27,7 +27,6 @@
     "noPropertyAccessFromIndexSignature": true,
     "noUncheckedSideEffectImports": true,
     "strictNullChecks": true,
-    "jsxImportSource": "hono/jsx",
     "downlevelIteration": true,
     "sourceMap": true,
     "plugins": [

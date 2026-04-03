@@ -1,11 +1,11 @@
-import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
-import * as BunPath from "@effect/platform-bun/BunPath";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient";
 
 import { MigrationsLive } from "./migrations";
 
@@ -21,7 +21,7 @@ const DatabaseSetupLive = Layer.effectDiscard(
   }),
 ).pipe(Layer.provideMerge(MigrationsLive));
 
-export const getDatabasePath = (): string => Bun.env["DATABASE_PATH"] ?? defaultDatabasePath;
+export const getDatabasePath = (): string => process.env["DATABASE_PATH"] ?? defaultDatabasePath;
 
 export const makeDatabaseLayer = (
   dbPath: string,
@@ -38,7 +38,7 @@ export const makeDatabaseLayer = (
       }
 
       return Layer.provideMerge(DatabaseSetupLive, SqliteClient.layer({ filename: dbPath }));
-    }).pipe(Effect.provide([BunFileSystem.layer, BunPath.layer])),
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])),
   );
 
 export const initializeDatabase = (dbPath: string): Effect.Effect<void, unknown> =>

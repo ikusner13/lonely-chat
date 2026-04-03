@@ -1,29 +1,40 @@
 {
   "name": "lonely-chat",
+  "type": "module",
   "scripts": {
-    "prepare": "vp config && effect-language-service patch",
+    "prepare": "svelte-kit sync && vp config && effect-language-service patch",
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "bun ./node_modules/vitest/vitest.mjs run",
-    "type-check": "tsc --noEmit",
-    "build": "vp pack src/index.ts -d dist"
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@effect/ai-openrouter": "4.0.0-beta.43",
-    "@effect/platform-bun": "4.0.0-beta.43",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.43",
+    "@effect/platform-node": "4.0.0-beta.43",
+    "@effect/sql-sqlite-node": "4.0.0-beta.43",
     "@twurple/api": "^7.3.0",
     "@twurple/auth": "^7.3.0",
     "@twurple/chat": "^7.3.0",
     "@twurple/eventsub-ws": "^7.3.0",
     "arctic": "^3.7.0",
+    "better-sqlite3": "^12.8.0",
     "effect": "4.0.0-beta.43",
-    "hono": "^4.8.5",
     "zod": "^4.0.5"
   },
   "devDependencies": {
     "@effect/language-service": "^0.84.3",
     "@effect/vitest": "4.0.0-beta.43",
-    "@types/bun": "latest",
+    "@sveltejs/adapter-node": "^5.5.4",
+    "@sveltejs/kit": "^2.55.0",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/better-sqlite3": "^7.6.13",
     "dotenv-cli": "^9.0.0",
+    "svelte": "^5.55.1",
+    "svelte-check": "^4.4.6",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.8.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",
     "vite-plus": "latest",
@@ -32,5 +43,10 @@
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@latest"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
 }

@@ -16,6 +16,8 @@ logs/
 
 # build
 dist/
+build/
+.svelte-kit/
 
 # config
 config/bots.toml

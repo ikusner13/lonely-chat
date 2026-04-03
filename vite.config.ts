@@ -1,6 +1,9 @@
+import { sveltekit } from "@sveltejs/kit/vite";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  plugins: [sveltekit(), tailwindcss()],
   lint: {
     categories: {
       correctness: "error",
@@ -13,7 +16,7 @@ export default defineConfig({
     env: {
       browser: true,
     },
-    ignorePatterns: [".references"],
+    ignorePatterns: [".references", ".svelte-kit", "build"],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -118,6 +121,8 @@ export default defineConfig({
       // Mock factories use Promise.resolve/reject.
       "promise/prefer-await-to-then": "off",
 
+      // Svelte $state() declarations trigger this rule outside test files.
+      "vitest/require-hook": "off",
       "vitest/consistent-test-filename": "error",
       "vitest/consistent-vitest-vi": "error",
       "vitest/expect-expect": "error",

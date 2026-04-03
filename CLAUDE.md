@@ -4,8 +4,10 @@
 
 ## Foundation
 
+- **SvelteKit** with Svelte 5 (runes, async components, remote functions)
 - **Effect v4** (4.0.0-beta.43)
 - **Vite+** toolchain (oxlint + oxfmt), all lint categories enabled, type-aware
+- **Tailwind v4**
 - **pnpm** package manager
 
 ## Commands
@@ -14,10 +16,20 @@
 vp check        # format + lint + typecheck (USE THIS for validation)
 vp lint         # lint only (type-aware enabled in config)
 vp fmt          # format only
-vp dev          # dev server
-vp pack         # production build
+vp dev          # dev server (SvelteKit)
+vp build        # production build (SvelteKit)
+vp preview      # preview production build
 vp test         # run tests
+pnpm run check  # svelte-kit sync + svelte-check
 ```
+
+## SvelteKit Patterns
+
+- Remote functions in `src/lib/remote/*.remote.ts` -- `query`, `form`, `command` from `$app/server`
+- Effect runtime bridge in `src/lib/server/runtime.ts` -- `effectRunner()` runs Effect programs server-side
+- Async components with `await` in markup, `<svelte:boundary>` for loading states
+- No `+page.server.ts` needed -- remote functions replace both `load` and form actions
+- Validation uses `"unchecked"` with manual validation (Effect Schema not yet Standard Schema compatible)
 
 ## Effect v4 Patterns
 
