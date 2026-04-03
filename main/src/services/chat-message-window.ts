@@ -1,4 +1,4 @@
-import type { ChatMessage } from './chat-listener.service';
+import type { ChatMessage } from "./chat-listener.service";
 
 interface ChatMessageWithExpiration extends ChatMessage {
   expiration: number;
@@ -12,10 +12,7 @@ export class ChatMessageWindow {
   private readonly maxMessages: number;
   private readonly messageExpirationDuration: number;
 
-  constructor(
-    maxMessages = MAX_MESSAGES,
-    messageExpirationDuration = TEN_MINUTES
-  ) {
+  constructor(maxMessages = MAX_MESSAGES, messageExpirationDuration = TEN_MINUTES) {
     this.maxMessages = maxMessages;
     this.messageExpirationDuration = messageExpirationDuration;
   }
@@ -37,9 +34,7 @@ export class ChatMessageWindow {
     this.cleanupExpiredMessages();
   }
 
-  private createMessageWithExpiration(
-    message: ChatMessage
-  ): ChatMessageWithExpiration {
+  private createMessageWithExpiration(message: ChatMessage): ChatMessageWithExpiration {
     return {
       ...message,
       expiration: Date.now() + this.messageExpirationDuration,

@@ -41,7 +41,6 @@ Temperature controls the randomness and creativity of AI responses. It's crucial
   - Nearly identical responses to the same prompt
   - Best for: Technical documentation, factual Q&A, code generation
   - Personality: Serious, professional, reliable
-  
 - **0.4 - 0.7**: **Balanced** (Default range)
   - Some variation while staying on topic
   - Best for: General assistants, customer service, tutoring
@@ -84,6 +83,7 @@ Same prompt: "Tell me about cats"
 ## Available Models
 
 Some popular models on OpenRouter:
+
 - `openai/gpt-4o-mini` - Fast and capable
 - `anthropic/claude-3.5-sonnet` - Advanced reasoning
 - `meta-llama/llama-3.1-70b-instruct` - Open source powerhouse

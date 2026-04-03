@@ -1,7 +1,7 @@
-import type { FC } from 'hono/jsx';
-import type { TokenStorage } from '@/shared/token.service';
-import { TokenCard } from './token-card';
-import { TunnelStatus } from './tunnel-status';
+import type { FC } from "hono/jsx";
+import type { TokenStorage } from "@/shared/token.service";
+import { TokenCard } from "./token-card";
+import { TunnelStatus } from "./tunnel-status";
 
 interface DashboardProps {
   tokens: TokenStorage;
@@ -48,9 +48,7 @@ export const Dashboard: FC<DashboardProps> = ({ tokens, tunnelUrl }) => {
                 name={name}
                 token={token}
                 type={
-                  token.scope.some((s: string) => s.includes('moderator'))
-                    ? 'moderator'
-                    : 'bot'
+                  token.scope.some((s: string) => s.includes("moderator")) ? "moderator" : "bot"
                 }
               />
             ))}
@@ -103,11 +101,9 @@ export const Dashboard: FC<DashboardProps> = ({ tokens, tunnelUrl }) => {
         <h2 class="mb-4 font-semibold text-2xl text-gray-700">Quick Actions</h2>
         <div class="rounded-lg bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
           <h3 class="mb-2 font-semibold text-lg">OAuth Configuration</h3>
-          <p class="mb-4">
-            Ensure your Twitch app is configured with this redirect URI:
-          </p>
+          <p class="mb-4">Ensure your Twitch app is configured with this redirect URI:</p>
           <div class="break-all rounded bg-gray-100 px-2 py-1 font-mono text-sm">
-            {tunnelUrl ? `${tunnelUrl}/callback` : 'Tunnel not connected'}
+            {tunnelUrl ? `${tunnelUrl}/callback` : "Tunnel not connected"}
           </div>
           {tunnelUrl && (
             <button

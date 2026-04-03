@@ -1,14 +1,14 @@
-import { createLogger } from '@/shared/logger';
-import { TokenManager } from '@/shared/token.service';
-import { env } from './env';
-import { AIService } from './services/ai.service';
-import { BotManager } from './services/bot-manager';
-import { BotResponseCoordinator } from './services/bot-response-coordinator';
-import { ChatListenerService } from './services/chat-listener.service';
-import { ChatMessageWindow } from './services/chat-message-window';
-import { ChatbotQueue } from './services/chatbot-queue';
-import { ConfigManager } from './services/config-manager';
-import { StreamService } from './services/stream.service';
+import { createLogger } from "@/shared/logger";
+import { TokenManager } from "@/shared/token.service";
+import { env } from "./env";
+import { AIService } from "./services/ai.service";
+import { BotManager } from "./services/bot-manager";
+import { BotResponseCoordinator } from "./services/bot-response-coordinator";
+import { ChatListenerService } from "./services/chat-listener.service";
+import { ChatMessageWindow } from "./services/chat-message-window";
+import { ChatbotQueue } from "./services/chatbot-queue";
+import { ConfigManager } from "./services/config-manager";
+import { StreamService } from "./services/stream.service";
 
 export class App {
   private chatListener!: ChatListenerService;
@@ -19,15 +19,15 @@ export class App {
   private responseCoordinator!: BotResponseCoordinator;
   private configManager!: ConfigManager;
   private streamService?: StreamService;
-  private logger = createLogger('App');
+  private logger = createLogger("App");
 
   async start() {
-    this.logger.info('🚀 Starting Twitch Bot App...');
+    this.logger.info("🚀 Starting Twitch Bot App...");
 
     await this.initializeServices();
     await this.connectStream();
 
-    this.logger.info('✅ App started successfully!');
+    this.logger.info("✅ App started successfully!");
   }
 
   private async initializeServices() {
@@ -36,7 +36,7 @@ export class App {
     await this.configManager.initialize();
 
     // Set up config update handler
-    this.configManager.on('config:updated', () => {
+    this.configManager.on("config:updated", () => {
       this.updateAllBotConfigs();
     });
 
@@ -60,7 +60,7 @@ export class App {
       queue,
       this.messageWindow,
       this.botManager.getBots(),
-      this.configManager
+      this.configManager,
     );
 
     // Chat listener
@@ -68,7 +68,7 @@ export class App {
   }
 
   private async connectStream() {
-    this.logger.info('📡 Setting up stream monitoring...');
+    this.logger.info("📡 Setting up stream monitoring...");
     this.streamService = await StreamService.createAndMonitor({
       clientId: env.TWITCH_CLIENT_ID,
       clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -76,13 +76,13 @@ export class App {
       tokenManager: this.tokenManager,
     });
 
-    this.streamService.on('stream:online', async () => this.connectAll());
-    this.streamService.on('stream:offline', () => this.disconnectAll());
+    this.streamService.on("stream:online", async () => this.connectAll());
+    this.streamService.on("stream:offline", () => this.disconnectAll());
   }
 
   private async connectAll() {
     // Set up message listeners
-    this.chatListener.on('message', (msg) => {
+    this.chatListener.on("message", (msg) => {
       this.botManager.handleMessage(msg);
       this.responseCoordinator.handleIncomingMessage(msg);
     });
@@ -98,7 +98,7 @@ export class App {
   }
 
   private updateAllBotConfigs() {
-    this.logger.info('Updating all bot configs...');
+    this.logger.info("Updating all bot configs...");
 
     // Get fresh config
     const bots = this.configManager.getBots();
@@ -106,7 +106,7 @@ export class App {
     // Update each bot's config
     const botServices = this.botManager.getBots();
     for (const botConfig of bots) {
-      if (botConfig.role === 'moderator') {
+      if (botConfig.role === "moderator") {
         // Update moderator bot config
         this.botManager.updateModeratorConfig(botConfig);
       } else {
@@ -128,7 +128,7 @@ export class App {
   }
 
   async destroy(): Promise<void> {
-    this.logger.info('Destroying app services...');
+    this.logger.info("Destroying app services...");
 
     // Stop stream service first
     if (this.streamService) {
@@ -150,6 +150,6 @@ export class App {
       this.configManager.destroy();
     }
 
-    this.logger.info('App destroyed successfully');
+    this.logger.info("App destroyed successfully");
   }
 }

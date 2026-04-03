@@ -1,16 +1,12 @@
-import { Hono } from 'hono';
-import { createLogger } from '@/shared/logger';
-import { TokenManager } from '@/shared/token.service';
-import { Layout } from '../components/layout';
-import { env } from '../env';
-import {
-  exchangeCodeForTokens,
-  generateAuthUrl,
-  getUserInfo,
-} from '../lib/oauth';
+import { Hono } from "hono";
+import { createLogger } from "@/shared/logger";
+import { TokenManager } from "@/shared/token.service";
+import { Layout } from "../components/layout";
+import { env } from "../env";
+import { exchangeCodeForTokens, generateAuthUrl, getUserInfo } from "../lib/oauth";
 
 const channelRoutes = new Hono();
-const logger = createLogger('ChannelAuth');
+const logger = createLogger("ChannelAuth");
 const tokenManager = new TokenManager({
   clientId: env.TWITCH_CLIENT_ID,
   clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -18,20 +14,19 @@ const tokenManager = new TokenManager({
 });
 
 // Start channel auth flow
-channelRoutes.get('/', (c) => {
-  const authUrl = generateAuthUrl('channel');
+channelRoutes.get("/", (c) => {
+  const authUrl = generateAuthUrl("channel");
 
   return c.html(
     <Layout title="Generate Channel Token">
       <div class="rounded-lg bg-white p-6 shadow-sm">
         <h2 class="mb-4 font-semibold text-2xl">Generate Channel Token</h2>
         <p class="mb-4">
-          This will generate a token for your Twitch channel to monitor stream
-          events. No special permissions are required for public stream events.
+          This will generate a token for your Twitch channel to monitor stream events. No special
+          permissions are required for public stream events.
         </p>
         <p class="mb-4">
-          <strong>Note:</strong> Make sure to log in with your channel account,
-          not a bot account.
+          <strong>Note:</strong> Make sure to log in with your channel account, not a bot account.
         </p>
         <a
           class="inline-block rounded-md bg-purple-600 px-6 py-3 font-medium text-white no-underline transition-colors hover:bg-purple-700"
@@ -40,13 +35,13 @@ channelRoutes.get('/', (c) => {
           Authenticate with Twitch
         </a>
       </div>
-    </Layout>
+    </Layout>,
   );
 });
 
 // Handle OAuth callback
-channelRoutes.get('/callback', async (c) => {
-  const code = c.req.query('code');
+channelRoutes.get("/callback", async (c) => {
+  const code = c.req.query("code");
 
   if (!code) {
     return c.html(
@@ -61,7 +56,7 @@ channelRoutes.get('/callback', async (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 
@@ -91,24 +86,19 @@ channelRoutes.get('/callback', async (c) => {
         username: userInfo.username,
         scopes: tokenData.scope,
       },
-      'Channel token saved successfully'
+      "Channel token saved successfully",
     );
 
     return c.html(
       <Layout title="Authentication Successful">
         <div class="rounded-md border border-green-400 bg-green-100 p-4 text-green-700">
-          <h2 class="mb-2 font-semibold text-xl">
-            ✅ Authentication Successful!
-          </h2>
+          <h2 class="mb-2 font-semibold text-xl">✅ Authentication Successful!</h2>
           <p class="mb-2">
-            Channel token for <strong>{userInfo.username}</strong> has been
-            saved.
+            Channel token for <strong>{userInfo.username}</strong> has been saved.
           </p>
           <p class="mb-4">
-            Channel ID:{' '}
-            <code class="rounded bg-green-200 px-2 py-1 text-sm">
-              {userInfo.userId}
-            </code>
+            Channel ID:{" "}
+            <code class="rounded bg-green-200 px-2 py-1 text-sm">{userInfo.userId}</code>
           </p>
           <div class="flex gap-3">
             <a
@@ -119,19 +109,17 @@ channelRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   } catch (error) {
-    logger.error({ err: error }, 'Failed to save channel token');
+    logger.error({ err: error }, "Failed to save channel token");
 
     return c.html(
       <Layout title="Authentication Failed">
         <div class="rounded-md border border-red-400 bg-red-100 p-4 text-red-700">
           <h2 class="mb-2 font-semibold text-xl">Authentication Failed</h2>
           <p class="mb-2">Failed to exchange authorization code for tokens.</p>
-          <p class="mb-4">
-            Error: {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
+          <p class="mb-4">Error: {error instanceof Error ? error.message : "Unknown error"}</p>
           <div class="flex gap-3">
             <a
               class="inline-block rounded-md bg-purple-600 px-6 py-3 font-medium text-white no-underline transition-colors hover:bg-purple-700"
@@ -147,7 +135,7 @@ channelRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 });

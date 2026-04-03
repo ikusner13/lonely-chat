@@ -1,19 +1,19 @@
-import { Twitch } from 'arctic';
-import { createLogger } from '@/shared/logger';
-import { env } from '../env';
+import { Twitch } from "arctic";
+import { createLogger } from "@/shared/logger";
+import { env } from "../env";
 
-const logger = createLogger('OAuth');
+const logger = createLogger("OAuth");
 
 // Scope definitions
 export const SCOPES = {
   channel: [] as string[], // No special scopes needed for EventSub stream events
-  bot: ['chat:read', 'chat:edit'],
+  bot: ["chat:read", "chat:edit"],
   moderator: [
-    'chat:read',
-    'chat:edit',
-    'moderator:manage:banned_users',
-    'moderator:manage:chat_messages',
-    'moderator:read:chatters',
+    "chat:read",
+    "chat:edit",
+    "moderator:manage:banned_users",
+    "moderator:manage:chat_messages",
+    "moderator:read:chatters",
   ],
 };
 
@@ -21,14 +21,11 @@ export const SCOPES = {
 export const twitch = new Twitch(
   env.TWITCH_CLIENT_ID,
   env.TWITCH_CLIENT_SECRET,
-  env.TWITCH_REDIRECT_URI || 'http://localhost:8080/callback'
+  env.TWITCH_REDIRECT_URI || "http://localhost:8080/callback",
 );
 
 // Generate authorization URL
-export function generateAuthUrl(
-  type: 'channel' | 'bot' | 'moderator',
-  botName?: string
-): string {
+export function generateAuthUrl(type: "channel" | "bot" | "moderator", botName?: string): string {
   const state = botName ? `${type}:${botName}` : type;
   const scopes = SCOPES[type];
 
@@ -38,10 +35,10 @@ export function generateAuthUrl(
     {
       type,
       botName,
-      scopes: scopes.length > 0 ? scopes : 'none (public events only)',
+      scopes: scopes.length > 0 ? scopes : "none (public events only)",
       url: url.toString(),
     },
-    'Generated auth URL'
+    "Generated auth URL",
   );
 
   return url.toString();
@@ -60,7 +57,7 @@ export async function exchangeCodeForTokens(code: string) {
       scope: (tokens.data.scope as string[]) || [],
     };
   } catch (error) {
-    logger.error({ err: error }, 'Failed to exchange code for tokens');
+    logger.error({ err: error }, "Failed to exchange code for tokens");
     throw error;
   }
 }
@@ -68,10 +65,10 @@ export async function exchangeCodeForTokens(code: string) {
 // Get user info from access token
 export async function getUserInfo(accessToken: string) {
   try {
-    const response = await fetch('https://api.twitch.tv/helix/users', {
+    const response = await fetch("https://api.twitch.tv/helix/users", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Client-Id': env.TWITCH_CLIENT_ID,
+        "Client-Id": env.TWITCH_CLIENT_ID,
       },
     });
 
@@ -85,7 +82,7 @@ export async function getUserInfo(accessToken: string) {
     const user = data.data[0];
 
     if (!user) {
-      throw new Error('No user found');
+      throw new Error("No user found");
     }
 
     return {
@@ -94,7 +91,7 @@ export async function getUserInfo(accessToken: string) {
       displayName: user.display_name,
     };
   } catch (error) {
-    logger.error({ err: error }, 'Failed to get user info');
+    logger.error({ err: error }, "Failed to get user info");
     throw error;
   }
 }

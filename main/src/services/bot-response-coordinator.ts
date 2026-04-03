@@ -1,13 +1,13 @@
-import { createLogger } from '@/shared/logger';
-import type { AIService } from './ai.service';
-import type { ChatMessage } from './chat-listener.service';
-import type { ChatMessageWindow } from './chat-message-window';
-import type { ChatbotService } from './chatbot.service';
-import type { ChatbotQueue } from './chatbot-queue';
-import type { ConfigManager } from './config-manager';
+import { createLogger } from "@/shared/logger";
+import type { AIService } from "./ai.service";
+import type { ChatMessage } from "./chat-listener.service";
+import type { ChatMessageWindow } from "./chat-message-window";
+import type { ChatbotService } from "./chatbot.service";
+import type { ChatbotQueue } from "./chatbot-queue";
+import type { ConfigManager } from "./config-manager";
 
 export class BotResponseCoordinator {
-  private logger = createLogger('BotResponseCoordinator');
+  private logger = createLogger("BotResponseCoordinator");
   private readonly RANDOM_RESPONSE_CHANCE = 0.25;
   private ai: AIService;
   private queue: ChatbotQueue;
@@ -20,7 +20,7 @@ export class BotResponseCoordinator {
     queue: ChatbotQueue,
     messageWindow: ChatMessageWindow,
     bots: Map<string, ChatbotService>,
-    configManager: ConfigManager
+    configManager: ConfigManager,
   ) {
     this.ai = ai;
     this.queue = queue;
@@ -35,7 +35,7 @@ export class BotResponseCoordinator {
 
   refreshBotConfigs(configManager: ConfigManager): void {
     this.configManager = configManager;
-    this.logger.info('Bot configs refreshed');
+    this.logger.info("Bot configs refreshed");
   }
 
   destroy(): void {
@@ -43,7 +43,7 @@ export class BotResponseCoordinator {
   }
 
   handleIncomingMessage(msg: ChatMessage) {
-    this.logger.debug({ chatMessage: msg }, 'Processing message');
+    this.logger.debug({ chatMessage: msg }, "Processing message");
     this.messageWindow.addMessage(msg);
 
     const botsToRespond = this.determineRespondingBots(msg);
@@ -77,10 +77,7 @@ export class BotResponseCoordinator {
   }
 
   private shouldBotRandomlyRespond(botsAlreadyResponding: string[]): boolean {
-    return (
-      botsAlreadyResponding.length === 0 &&
-      Math.random() < this.RANDOM_RESPONSE_CHANCE
-    );
+    return botsAlreadyResponding.length === 0 && Math.random() < this.RANDOM_RESPONSE_CHANCE;
   }
 
   private queueBotResponses(botsToRespond: string[], msg: ChatMessage): void {
@@ -106,15 +103,12 @@ export class BotResponseCoordinator {
             triggerMessage: `${msg.user}: ${msg.message}`,
             context: this.messageWindow.messages,
           });
-          this.logger.debug({ response }, 'Generated response');
+          this.logger.debug({ response }, "Generated response");
           if (response) {
             bot.say(response);
           }
         } catch (error) {
-          this.logger.error(
-            { err: error },
-            `Error generating response for ${botName}`
-          );
+          this.logger.error({ err: error }, `Error generating response for ${botName}`);
         }
       });
     }

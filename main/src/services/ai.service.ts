@@ -1,14 +1,14 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateObject, generateText, type ModelMessage } from 'ai';
-import z from 'zod';
-import { createLogger } from '@/shared/logger';
-import { env } from '../env';
-import type { ChatMessage } from './chat-listener.service';
-import type { BotConfig } from './config-manager';
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateObject, generateText, type ModelMessage } from "ai";
+import z from "zod";
+import { createLogger } from "@/shared/logger";
+import { env } from "../env";
+import type { ChatMessage } from "./chat-listener.service";
+import type { BotConfig } from "./config-manager";
 
 export class AIService {
   private openrouter;
-  private logger = createLogger('AIService');
+  private logger = createLogger("AIService");
 
   constructor() {
     this.openrouter = createOpenRouter({ apiKey: env.OPENROUTER_KEY });
@@ -33,7 +33,7 @@ export class AIService {
       }
 
       messages.push({
-        role: 'user' as const,
+        role: "user" as const,
         content: triggerMessage,
       });
 
@@ -49,10 +49,7 @@ export class AIService {
 
       return result.text;
     } catch (error) {
-      this.logger.error(
-        { err: error },
-        `Error generating AI response for ${botName}`
-      );
+      this.logger.error({ err: error }, `Error generating AI response for ${botName}`);
       return null;
     }
   }
@@ -72,10 +69,7 @@ export class AIService {
       duration: number;
     }[];
   } | null> {
-    const moderationMessages = this.buildModerationMessages(
-      messages,
-      moderatorBotName
-    );
+    const moderationMessages = this.buildModerationMessages(messages, moderatorBotName);
 
     try {
       const { object } = await generateObject({
@@ -83,19 +77,14 @@ export class AIService {
         schema: z.object({
           violations: z.array(
             z.object({
-              user: z
-                .string()
-                .describe('The username of the user that violated the rules'),
-              reason: z
-                .string()
-                .max(100)
-                .describe('The reason for the violation'),
+              user: z.string().describe("The username of the user that violated the rules"),
+              reason: z.string().max(100).describe("The reason for the violation"),
               duration: z
                 .number()
                 .min(1)
                 .max(60)
-                .describe('The duration of the timeout in seconds'),
-            })
+                .describe("The duration of the timeout in seconds"),
+            }),
           ),
         }),
         system: `You are a moderator in this twitch chat. 
@@ -120,13 +109,13 @@ Each object in the array must have:
         maxOutputTokens: moderatorConfig.maxTokens || 150,
       });
 
-      this.logger.info({ moderationResults: object }, 'Moderation results');
+      this.logger.info({ moderationResults: object }, "Moderation results");
 
       return object;
     } catch (error) {
       this.logger.error(
         { err: error, moderationMessages },
-        `Error generating moderation response for ${moderatorBotName}`
+        `Error generating moderation response for ${moderatorBotName}`,
       );
       return null;
     }
@@ -149,7 +138,7 @@ Each object in the array must have:
 
   private buildModerationMessages(
     messages: ChatMessage[],
-    moderatorBotName: string
+    moderatorBotName: string,
   ): ModelMessage[] {
     const moderationMessages: ModelMessage[] = [];
 
@@ -161,7 +150,7 @@ Each object in the array must have:
       }
 
       moderationMessages.push({
-        role: 'user' as const,
+        role: "user" as const,
         content: `${msg.user}: ${msg.message}`,
       });
     }
@@ -172,17 +161,17 @@ Each object in the array must have:
   private buildMessagesFromContext(
     messages: ModelMessage[],
     context: Array<{ user: string; message: string; role: string }>,
-    botName: string
+    botName: string,
   ): void {
     for (const msg of context) {
       if (msg.user.toLowerCase() === botName.toLowerCase()) {
         messages.push({
-          role: 'assistant' as const,
+          role: "assistant" as const,
           content: msg.message,
         });
       } else {
         messages.push({
-          role: 'user' as const,
+          role: "user" as const,
           content: `${msg.user}: ${msg.message}`,
         });
       }

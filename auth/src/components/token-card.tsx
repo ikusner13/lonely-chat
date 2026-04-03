@@ -1,9 +1,9 @@
-import type { FC } from 'hono/jsx';
-import type { TokenData } from '@/shared/token.service';
-import { formatScopes, getTokenInfo } from '../lib/tokens';
+import type { FC } from "hono/jsx";
+import type { TokenData } from "@/shared/token.service";
+import { formatScopes, getTokenInfo } from "../lib/tokens";
 
 interface TokenCardProps {
-  type: 'channel' | 'bot' | 'moderator';
+  type: "channel" | "bot" | "moderator";
   name: string;
   token: TokenData;
 }
@@ -13,15 +13,15 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
   let typeEmoji: string;
   let typeLabel: string;
 
-  if (type === 'channel') {
-    typeEmoji = '📡';
-    typeLabel = 'Channel';
-  } else if (type === 'moderator') {
-    typeEmoji = '🛡️';
-    typeLabel = 'Moderator Bot';
+  if (type === "channel") {
+    typeEmoji = "📡";
+    typeLabel = "Channel";
+  } else if (type === "moderator") {
+    typeEmoji = "🛡️";
+    typeLabel = "Moderator Bot";
   } else {
-    typeEmoji = '🤖';
-    typeLabel = 'Regular Bot';
+    typeEmoji = "🤖";
+    typeLabel = "Regular Bot";
   }
 
   return (
@@ -32,17 +32,11 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
         </h3>
         <span
           class={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-medium text-sm ${
-            info.isExpired
-              ? 'bg-red-100 text-red-700'
-              : 'bg-green-100 text-green-700'
+            info.isExpired ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
           }`}
         >
-          <span
-            class={`h-2 w-2 rounded-full ${
-              info.isExpired ? 'bg-red-500' : 'bg-green-500'
-            }`}
-          />
-          {info.isExpired ? 'Expired' : 'Active'}
+          <span class={`h-2 w-2 rounded-full ${info.isExpired ? "bg-red-500" : "bg-green-500"}`} />
+          {info.isExpired ? "Expired" : "Active"}
         </span>
       </div>
 
@@ -55,24 +49,18 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
         {token.channelName && (
           <div>
             <span class="font-semibold text-gray-500 text-sm">Username:</span>
-            <span class="ml-1 break-all font-mono text-sm">
-              {token.channelName}
-            </span>
+            <span class="ml-1 break-all font-mono text-sm">{token.channelName}</span>
           </div>
         )}
 
         <div>
           <span class="font-semibold text-gray-500 text-sm">Expires:</span>
-          <span class="ml-1 break-all font-mono text-sm">
-            {info.timeUntilExpiry}
-          </span>
+          <span class="ml-1 break-all font-mono text-sm">{info.timeUntilExpiry}</span>
         </div>
 
         <div>
           <span class="font-semibold text-gray-500 text-sm">Scopes:</span>
-          <span class="ml-1 break-all font-mono text-sm">
-            {formatScopes(token.scope)}
-          </span>
+          <span class="ml-1 break-all font-mono text-sm">{formatScopes(token.scope)}</span>
         </div>
       </div>
 
@@ -80,9 +68,7 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
         {info.isExpired && (
           <a
             class="rounded-md bg-purple-600 px-4 py-2 font-medium text-sm text-white transition-colors hover:bg-purple-700"
-            href={
-              type === 'channel' ? '/auth/channel' : `/auth/${type}/${name}`
-            }
+            href={type === "channel" ? "/auth/channel" : `/auth/${type}/${name}`}
           >
             Refresh Token
           </a>
@@ -90,8 +76,8 @@ export const TokenCard: FC<TokenCardProps> = ({ type, name, token }) => {
         <button
           class="rounded-md bg-red-500 px-4 py-2 font-medium text-sm text-white transition-colors hover:bg-red-600"
           onclick={`
-            if (confirm('Delete ${type} token for ${name || 'channel'}?')) {
-              const url = ${type === 'channel' ? `'/api/tokens/channel'` : `'/api/tokens/${type}/${name}'`};
+            if (confirm('Delete ${type} token for ${name || "channel"}?')) {
+              const url = ${type === "channel" ? `'/api/tokens/channel'` : `'/api/tokens/${type}/${name}'`};
                 
               fetch(url, { method: 'DELETE' })
                 .then(response => {

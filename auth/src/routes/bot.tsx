@@ -1,16 +1,12 @@
-import { Hono } from 'hono';
-import { createLogger } from '@/shared/logger';
-import { TokenManager } from '@/shared/token.service';
-import { Layout } from '../components/layout';
-import { env } from '../env';
-import {
-  exchangeCodeForTokens,
-  generateAuthUrl,
-  getUserInfo,
-} from '../lib/oauth';
+import { Hono } from "hono";
+import { createLogger } from "@/shared/logger";
+import { TokenManager } from "@/shared/token.service";
+import { Layout } from "../components/layout";
+import { env } from "../env";
+import { exchangeCodeForTokens, generateAuthUrl, getUserInfo } from "../lib/oauth";
 
 const botRoutes = new Hono();
-const logger = createLogger('BotAuth');
+const logger = createLogger("BotAuth");
 const tokenManager = new TokenManager({
   clientId: env.TWITCH_CLIENT_ID,
   clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -18,8 +14,8 @@ const tokenManager = new TokenManager({
 });
 
 // Start bot auth flow
-botRoutes.get('/new', (c) => {
-  const botName = c.req.query('name');
+botRoutes.get("/new", (c) => {
+  const botName = c.req.query("name");
 
   if (!botName) {
     return c.html(
@@ -31,40 +27,40 @@ botRoutes.get('/new', (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 
-  const authUrl = generateAuthUrl('bot', botName);
+  const authUrl = generateAuthUrl("bot", botName);
 
   return c.html(
     <Layout title={`Generate Bot Token: ${botName}`}>
       <div class="card">
         <h2>Generate Bot Token: {botName}</h2>
         <p style="margin-bottom: 1rem;">
-          This will generate a token for <strong>{botName}</strong> to read and
-          send messages in chat.
+          This will generate a token for <strong>{botName}</strong> to read and send messages in
+          chat.
         </p>
         <p style="margin-bottom: 1rem;">
           Required scopes: <code>chat:read</code>, <code>chat:edit</code>
         </p>
         <p style="margin-bottom: 1rem; color: #dc2626;">
-          <strong>Important:</strong> Log in with the bot's Twitch account, not
-          your channel account.
+          <strong>Important:</strong> Log in with the bot's Twitch account, not your channel
+          account.
         </p>
         <a class="button" href={authUrl}>
           Authenticate Bot with Twitch
         </a>
       </div>
-    </Layout>
+    </Layout>,
   );
 });
 
 // Handle OAuth callback
-botRoutes.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  const state = c.req.query('state');
-  const botName = c.req.query('botName') || state?.split(':')[1];
+botRoutes.get("/callback", async (c) => {
+  const code = c.req.query("code");
+  const state = c.req.query("state");
+  const botName = c.req.query("botName") || state?.split(":")[1];
 
   if (!(code && botName)) {
     return c.html(
@@ -76,7 +72,7 @@ botRoutes.get('/callback', async (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 
@@ -107,7 +103,7 @@ botRoutes.get('/callback', async (c) => {
         username: userInfo.username,
         scopes: tokenData.scope,
       },
-      'Bot token saved successfully'
+      "Bot token saved successfully",
     );
 
     return c.html(
@@ -121,7 +117,7 @@ botRoutes.get('/callback', async (c) => {
             Twitch account: <strong>{userInfo.username}</strong>
           </p>
           <p>
-            Granted scopes: <code>{tokenData.scope.join(', ')}</code>
+            Granted scopes: <code>{tokenData.scope.join(", ")}</code>
           </p>
           <div class="actions">
             <a class="button" href="/">
@@ -129,19 +125,17 @@ botRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   } catch (error) {
-    logger.error({ err: error }, 'Failed to save bot token');
+    logger.error({ err: error }, "Failed to save bot token");
 
     return c.html(
       <Layout title="Authentication Failed">
         <div class="error">
           <h2>Authentication Failed</h2>
           <p>Failed to exchange authorization code for tokens.</p>
-          <p>
-            Error: {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
+          <p>Error: {error instanceof Error ? error.message : "Unknown error"}</p>
           <div class="actions">
             <a class="button" href={`/auth/bot/new?name=${botName}`}>
               Try Again
@@ -151,15 +145,15 @@ botRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 });
 
 // Refresh existing bot token
-botRoutes.get('/:name', (c) => {
-  const botName = c.req.param('name');
-  const authUrl = generateAuthUrl('bot', botName);
+botRoutes.get("/:name", (c) => {
+  const botName = c.req.param("name");
+  const authUrl = generateAuthUrl("bot", botName);
 
   try {
     const tokens = tokenManager.loadTokens();
@@ -175,7 +169,7 @@ botRoutes.get('/:name', (c) => {
               Back to Dashboard
             </a>
           </div>
-        </Layout>
+        </Layout>,
       );
     }
 
@@ -184,20 +178,18 @@ botRoutes.get('/:name', (c) => {
         <div class="card">
           <h2>Refresh Bot Token: {botName}</h2>
           <p style="margin-bottom: 1rem;">
-            Current token for <strong>{botName}</strong> expires at:{' '}
+            Current token for <strong>{botName}</strong> expires at:{" "}
             {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
           </p>
-          <p style="margin-bottom: 1rem;">
-            Click below to generate a new token.
-          </p>
+          <p style="margin-bottom: 1rem;">Click below to generate a new token.</p>
           <a class="button" href={authUrl}>
             Refresh Bot Token
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   } catch (error) {
-    logger.error({ err: error }, 'Failed to load bot token');
+    logger.error({ err: error }, "Failed to load bot token");
     return c.html(
       <Layout title="Error Loading Token">
         <div class="error">
@@ -207,7 +199,7 @@ botRoutes.get('/:name', (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 });

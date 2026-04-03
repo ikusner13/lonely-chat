@@ -1,12 +1,12 @@
-import PQueue from 'p-queue';
-import { createLogger } from '@/shared/logger';
+import PQueue from "p-queue";
+import { createLogger } from "@/shared/logger";
 
 export class ChatbotQueue {
   private readonly mainQueue: PQueue;
   private readonly botQueues: Map<string, PQueue>;
   private readonly minDelay: number;
   private readonly maxDelay: number;
-  private readonly logger = createLogger('ChatbotQueue');
+  private readonly logger = createLogger("ChatbotQueue");
 
   constructor(minDelay = 1000, maxDelay = 3000) {
     this.mainQueue = new PQueue({ concurrency: 5 });
@@ -31,7 +31,7 @@ export class ChatbotQueue {
   }
 
   stop(): void {
-    this.logger.info('🧹 Clearing message queue');
+    this.logger.info("🧹 Clearing message queue");
     this.mainQueue.clear();
     for (const botQueue of this.botQueues.values()) {
       botQueue.clear();

@@ -5,23 +5,27 @@ A sophisticated Twitch bot service that brings AI-powered personalities to your 
 ## 🌟 Key Features
 
 ### Smart Bot Management
+
 - **Automatic Stream Detection**: Bots connect when stream goes online, disconnect when offline
 - **Multi-Bot Support**: Run multiple bots simultaneously, each with unique personalities
 - **Natural Interactions**: Bots respond to mentions (@botname) and randomly participate (25% chance)
 - **Moderation Support**: Dedicated moderator bots with timeout capabilities
 
 ### Advanced AI Integration
+
 - **Multiple AI Models**: Access to Llama, Claude, GPT-4, Gemini, and more via OpenRouter
 - **Context-Aware Responses**: Bots maintain chat context for natural conversations
 - **Personality System**: Each bot has customizable personality, temperature, and response style
 - **Fallback Models**: Automatic failover to alternative models if primary fails
 
 ### Live Configuration
+
 - **Hot Reload**: Update bot personalities without restarting or disconnecting
 - **No Downtime**: Changes apply instantly while bots stay connected
 - **Safe Updates**: Validation ensures bad configs don't crash your bots
 
 ### Easy Token Management
+
 - **Unified Auth Dashboard**: Web interface for managing all tokens
 - **OAuth Flow**: Secure token generation with proper scopes
 - **Token Refresh**: Automatic and manual token refresh capabilities
@@ -34,6 +38,7 @@ A sophisticated Twitch bot service that brings AI-powered personalities to your 
 The easiest way to get started is using the published Docker images from GitHub Container Registry.
 
 #### Prerequisites
+
 - Docker and Docker Compose installed
 - Twitch application credentials ([create one here](https://dev.twitch.tv/console/apps))
 - OpenRouter API key ([get one here](https://openrouter.ai))
@@ -41,11 +46,13 @@ The easiest way to get started is using the published Docker images from GitHub 
 #### Quick Setup
 
 1. **Create a new directory for your deployment**:
+
 ```bash
 mkdir lonely-chat && cd lonely-chat
 ```
 
 2. **Create docker-compose.yml**:
+
 ```yaml
 services:
   lonely-chat:
@@ -86,6 +93,7 @@ volumes:
 ### Option 2: Building from Source
 
 #### Prerequisites
+
 - [Bun](https://bun.sh) runtime installed
 - Twitch application credentials ([create one here](https://dev.twitch.tv/console/apps))
 - OpenRouter API key ([get one here](https://openrouter.ai))
@@ -107,6 +115,7 @@ cp config/bots.toml.example config/bots.toml
 ### Configuration
 
 1. **Create `.env` file**:
+
 ```env
 # Twitch App Credentials
 TWITCH_CLIENT_ID=your_client_id
@@ -126,11 +135,13 @@ OPENROUTER_KEY=your_openrouter_api_key
 2. **Configure bots** (create `bots.toml` in your deployment directory):
 
    Download example configuration:
+
    ```bash
    wget https://raw.githubusercontent.com/ikusner13/lonely-chat/main/config/bots.toml.example -O bots.toml
    ```
 
    Or create manually:
+
    ```toml
    [[bots]]
    name = "friendlybot"
@@ -144,6 +155,7 @@ OPENROUTER_KEY=your_openrouter_api_key
 ### Generate Tokens
 
 #### For Docker Users:
+
 ```bash
 # Start the auth service
 docker compose up -d lonely-chat-auth
@@ -156,6 +168,7 @@ docker compose up -d lonely-chat-auth
 ```
 
 #### For Source Users:
+
 ```bash
 # Start the auth dashboard
 bun run auth
@@ -167,6 +180,7 @@ bun run auth
 ### Run the Service
 
 #### Docker (Recommended):
+
 ```bash
 # Start all services
 docker compose up -d
@@ -179,6 +193,7 @@ docker compose down
 ```
 
 #### From Source:
+
 ```bash
 # Development
 bun run dev
@@ -233,12 +248,14 @@ docker compose -f docker-compose.production.yml up -d
 #### Using Published Images
 
 The project publishes two Docker images to GitHub Container Registry:
+
 - `ghcr.io/ikusner13/lonely-chat:latest` - Main bot application
 - `ghcr.io/ikusner13/lonely-chat-auth:latest` - Auth dashboard for token management
 
 ##### Complete Docker Setup
 
 1. **Directory Structure**:
+
 ```
 lonely-chat/
 ├── docker-compose.yml
@@ -247,6 +264,7 @@ lonely-chat/
 ```
 
 2. **docker-compose.yml** (production ready):
+
 ```yaml
 services:
   lonely-chat:
@@ -290,6 +308,7 @@ volumes:
    - Tokens persist across container restarts
 
 4. **Updating Images**:
+
 ```bash
 # Pull latest images
 docker compose pull
@@ -357,17 +376,17 @@ Your personality and behavior...
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `TWITCH_CLIENT_ID` | Twitch app client ID | Yes |
-| `TWITCH_CLIENT_SECRET` | Twitch app client secret | Yes |
-| `TWITCH_CHANNEL_ID` | Your channel's user ID | Yes |
-| `TWITCH_CHANNEL_NAME` | Your channel username | Yes |
-| `OPENROUTER_KEY` | OpenRouter API key | Yes |
-| `LOCALTUNNEL_SUBDOMAIN` | Stable subdomain for auth | Development only |
-| `NODE_ENV` | Environment (development/production) | No |
-| `BOT_CONFIG_PATH` | Path to bots.toml | No (default: ./config/bots.toml) |
-| `TOKEN_DB_PATH` | Path to token database | No (default: ./tokens.db) |
+| Variable                | Description                          | Required                         |
+| ----------------------- | ------------------------------------ | -------------------------------- |
+| `TWITCH_CLIENT_ID`      | Twitch app client ID                 | Yes                              |
+| `TWITCH_CLIENT_SECRET`  | Twitch app client secret             | Yes                              |
+| `TWITCH_CHANNEL_ID`     | Your channel's user ID               | Yes                              |
+| `TWITCH_CHANNEL_NAME`   | Your channel username                | Yes                              |
+| `OPENROUTER_KEY`        | OpenRouter API key                   | Yes                              |
+| `LOCALTUNNEL_SUBDOMAIN` | Stable subdomain for auth            | Development only                 |
+| `NODE_ENV`              | Environment (development/production) | No                               |
+| `BOT_CONFIG_PATH`       | Path to bots.toml                    | No (default: ./config/bots.toml) |
+| `TOKEN_DB_PATH`         | Path to token database               | No (default: ./tokens.db)        |
 
 ## 🤝 Contributing
 
@@ -413,6 +432,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 Enable detailed logging:
 
 #### Docker:
+
 ```bash
 # Add to docker-compose.yml environment section
 environment:
@@ -420,6 +440,7 @@ environment:
 ```
 
 #### Development:
+
 ```bash
 LOG_LEVEL=debug bun run dev
 ```

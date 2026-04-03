@@ -1,14 +1,11 @@
-import type { Child, FC } from 'hono/jsx';
+import type { Child, FC } from "hono/jsx";
 
 interface LayoutProps {
   title?: string;
   children?: Child | Child[];
 }
 
-export const Layout: FC<LayoutProps> = ({
-  title = 'Twitch Auth',
-  children,
-}) => {
+export const Layout: FC<LayoutProps> = ({ title = "Twitch Auth", children }) => {
   return (
     <html lang="en">
       {/* biome-ignore lint/style/noHeadElement: This is a Hono app, not Next.js */}

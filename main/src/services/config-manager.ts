@@ -1,11 +1,11 @@
-import { existsSync } from 'node:fs';
-import { EventEmitter } from 'tseep';
-import { createLogger } from '@/shared/logger';
-import { env } from '../env';
+import { existsSync } from "node:fs";
+import { EventEmitter } from "tseep";
+import { createLogger } from "@/shared/logger";
+import { env } from "../env";
 
 export interface BotConfig {
   name: string;
-  role: 'chatter' | 'moderator';
+  role: "chatter" | "moderator";
   model: string;
   systemPrompt: string;
   temperature?: number;
@@ -19,12 +19,12 @@ interface ConfigFile {
 }
 
 export class ConfigManager extends EventEmitter<{
-  'config:updated': () => void;
-  'config:error': (error: Error) => void;
+  "config:updated": () => void;
+  "config:error": (error: Error) => void;
 }> {
   private config: ConfigFile | null = null;
   private configPath: string;
-  private logger = createLogger('ConfigManager');
+  private logger = createLogger("ConfigManager");
 
   constructor(configPath?: string) {
     super();
@@ -46,7 +46,7 @@ export class ConfigManager extends EventEmitter<{
       }
 
       // Convert relative path to absolute for import
-      const absolutePath = this.configPath.startsWith('/')
+      const absolutePath = this.configPath.startsWith("/")
         ? this.configPath
         : `${process.cwd()}/${this.configPath}`;
 
@@ -68,7 +68,7 @@ export class ConfigManager extends EventEmitter<{
 
       // Validate before applying
       if (!(newConfig.bots && Array.isArray(newConfig.bots))) {
-        throw new Error('Invalid config: missing bots array');
+        throw new Error("Invalid config: missing bots array");
       }
 
       // Only update if validation passes
@@ -76,7 +76,7 @@ export class ConfigManager extends EventEmitter<{
       this.logger.info(`Loaded ${this.config.bots.length} bots from config`);
     } catch (error) {
       // Re-throw to halt the app
-      this.logger.error({ err: error }, 'Failed to load config');
+      this.logger.error({ err: error }, "Failed to load config");
       throw error;
     }
   }
@@ -97,10 +97,10 @@ export class ConfigManager extends EventEmitter<{
   }
 
   getModerator(): BotConfig | null {
-    return this.getBots().find((bot) => bot.role === 'moderator') || null;
+    return this.getBots().find((bot) => bot.role === "moderator") || null;
   }
 
   getChatters(): BotConfig[] {
-    return this.getBots().filter((bot) => bot.role === 'chatter');
+    return this.getBots().filter((bot) => bot.role === "chatter");
   }
 }

@@ -1,12 +1,12 @@
-import { ApiClient } from '@twurple/api';
-import { EventEmitter } from 'tseep';
-import { createLogger } from '@/shared/logger';
-import type { TokenManager } from '@/shared/token.service';
-import { env } from '../env';
-import type { AIService } from './ai.service';
-import type { ChatMessage, Role } from './chat-listener.service';
-import { ChatbotService } from './chatbot.service';
-import type { BotConfig } from './config-manager';
+import { ApiClient } from "@twurple/api";
+import { EventEmitter } from "tseep";
+import { createLogger } from "@/shared/logger";
+import type { TokenManager } from "@/shared/token.service";
+import { env } from "../env";
+import type { AIService } from "./ai.service";
+import type { ChatMessage, Role } from "./chat-listener.service";
+import { ChatbotService } from "./chatbot.service";
+import type { BotConfig } from "./config-manager";
 
 export class ModeratorBotService extends EventEmitter<{
   moderate: (messages: ChatMessage[]) => void;
@@ -17,7 +17,7 @@ export class ModeratorBotService extends EventEmitter<{
 
   private readonly queueCheckInterval = 30_000 as const;
   private queueCheckIntervalId: NodeJS.Timeout | undefined = undefined;
-  private logger = createLogger('ModeratorBotService');
+  private logger = createLogger("ModeratorBotService");
 
   private modMessageQueue_: ChatMessage[] = [];
   private botUserId: string;
@@ -27,7 +27,7 @@ export class ModeratorBotService extends EventEmitter<{
     chatbot: ChatbotService,
     apiClient: ApiClient,
     botUserId: string,
-    config: BotConfig
+    config: BotConfig,
   ) {
     super();
 
@@ -42,14 +42,10 @@ export class ModeratorBotService extends EventEmitter<{
   static async create(
     tokenManager: TokenManager,
     botName: string,
-    config: BotConfig
+    config: BotConfig,
   ): Promise<ModeratorBotService> {
     try {
-      const chatbot = await ChatbotService.create(
-        tokenManager,
-        botName,
-        config
-      );
+      const chatbot = await ChatbotService.create(tokenManager, botName, config);
 
       const apiClient = new ApiClient({
         authProvider: chatbot.authProvider,
@@ -64,7 +60,7 @@ export class ModeratorBotService extends EventEmitter<{
       return new ModeratorBotService(chatbot, apiClient, botUserId, config);
     } catch (error) {
       throw new Error(
-        `Failed to create ModeratorBotService: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to create ModeratorBotService: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
   }
@@ -74,7 +70,7 @@ export class ModeratorBotService extends EventEmitter<{
   }
 
   leaveChannel(): void {
-    this.logger.info('👮 Moderator bot leaving channel');
+    this.logger.info("👮 Moderator bot leaving channel");
     this.stopQueueCheckInterval();
     this.chatbot.leaveChannel();
   }
@@ -86,7 +82,7 @@ export class ModeratorBotService extends EventEmitter<{
   updateConfig(newConfig: BotConfig): void {
     this.config = newConfig;
     this.chatbot.updateConfig(newConfig);
-    this.logger.info('Updated config for moderator bot');
+    this.logger.info("Updated config for moderator bot");
   }
 
   async timeout({
@@ -98,39 +94,33 @@ export class ModeratorBotService extends EventEmitter<{
     duration: number;
     reason: string;
   }): Promise<void> {
-    this.logger.info({ user, duration, reason }, 'Timing out user');
+    this.logger.info({ user, duration, reason }, "Timing out user");
 
     const twitchUser = await this.apiClient.users.getUserByName(user);
 
     if (!twitchUser) {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
 
     try {
       await this.apiClient.asUser(this.botUserId, async (userClient) => {
-        const bannedUsers = await userClient.moderation.banUser(
-          env.TWITCH_CHANNEL_ID,
-          {
-            user: twitchUser.id,
-            reason,
-            duration: this.ensureMaxTimeoutDuration(duration),
-          }
-        );
+        const bannedUsers = await userClient.moderation.banUser(env.TWITCH_CHANNEL_ID, {
+          user: twitchUser.id,
+          reason,
+          duration: this.ensureMaxTimeoutDuration(duration),
+        });
 
         const bannedUser = await bannedUsers[0]?.getUser();
 
-        this.logger.info({ user: bannedUser?.displayName }, 'Banned user');
+        this.logger.info({ user: bannedUser?.displayName }, "Banned user");
       });
     } catch (error) {
-      this.logger.error(
-        { err: error, user, duration, reason },
-        'Error timing out user'
-      );
+      this.logger.error({ err: error, user, duration, reason }, "Error timing out user");
     }
   }
 
   canTimeoutUser(role: Role): boolean {
-    return role === 'user';
+    return role === "user";
   }
 
   ensureMaxTimeoutDuration(duration: number): number {
@@ -150,7 +140,7 @@ export class ModeratorBotService extends EventEmitter<{
   }
 
   stopQueueCheckInterval(): void {
-    this.logger.info('👮 Moderator bot moderation queue stopped');
+    this.logger.info("👮 Moderator bot moderation queue stopped");
     clearInterval(this.queueCheckIntervalId);
   }
 
@@ -167,13 +157,13 @@ export class ModeratorBotService extends EventEmitter<{
   private processQueue(): void {
     const messages = this.modMessageQueue_;
 
-    this.logger.info({ messages }, 'Processing queue');
+    this.logger.info({ messages }, "Processing queue");
 
     if (messages.length === 0) {
       return;
     }
 
-    this.emit('moderate', messages);
+    this.emit("moderate", messages);
 
     this.clearQueue();
   }
@@ -181,9 +171,9 @@ export class ModeratorBotService extends EventEmitter<{
   async setupAndConnect(ai: AIService): Promise<void> {
     await this.joinChannel();
 
-    this.say(this.config.introMessage ?? '👋');
+    this.say(this.config.introMessage ?? "👋");
 
-    this.on('moderate', async (messages) => {
+    this.on("moderate", async (messages) => {
       const moderationResults = await ai.generateModerationResponse({
         moderatorBotName: this.config.name,
         moderatorConfig: this.config,
@@ -207,7 +197,7 @@ export class ModeratorBotService extends EventEmitter<{
             duration: result.duration,
             reason: result.reason,
           });
-        })
+        }),
       );
     });
   }

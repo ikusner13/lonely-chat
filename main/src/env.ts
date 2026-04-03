@@ -1,5 +1,5 @@
-import { createEnv } from '@t3-oss/env-core';
-import { z } from 'zod';
+import { createEnv } from "@t3-oss/env-core";
+import { z } from "zod";
 
 export const env = createEnv({
   server: {
@@ -10,28 +10,28 @@ export const env = createEnv({
     TWITCH_REDIRECT_URI: z
       .url()
       .optional()
-      .default('https://0wvvnjxz-8080.use.devtunnels.ms/callback'),
+      .default("https://0wvvnjxz-8080.use.devtunnels.ms/callback"),
     LOCALTUNNEL_SUBDOMAIN: z
       .string()
       .min(1)
-      .describe('Stable subdomain for localtunnel (e.g., my-twitch-auth)')
+      .describe("Stable subdomain for localtunnel (e.g., my-twitch-auth)")
       .optional(),
     OPENROUTER_KEY: z.string().min(1),
     DISABLE_EVENTSUB: z
       .string()
       // transform to boolean using preferred coercion logic
-      .transform((s) => s !== 'false' && s !== '0')
+      .transform((s) => s !== "false" && s !== "0")
       .optional()
       .default(false),
-    NODE_ENV: z.enum(['development', 'production']).default('development'),
-    TOKEN_DB_PATH: z.string().default('./tokens.db'),
-    BOT_CONFIG_PATH: z.string().default('./config/bots.toml'),
+    NODE_ENV: z.enum(["development", "production"]).default("development"),
+    TOKEN_DB_PATH: z.string().default("./tokens.db"),
+    BOT_CONFIG_PATH: z.string().default("./config/bots.toml"),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
   onValidationError: (issues) => {
     // biome-ignore lint/suspicious/noConsole: fine here
-    console.error('❌ Invalid environment variables:', issues);
-    throw new Error('Invalid environment variables');
+    console.error("❌ Invalid environment variables:", issues);
+    throw new Error("Invalid environment variables");
   },
 });

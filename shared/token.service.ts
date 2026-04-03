@@ -1,6 +1,6 @@
-import { type AccessToken, RefreshingAuthProvider } from '@twurple/auth';
-import { createLogger } from './logger';
-import { SQLiteTokenStore } from './sqlite-token-store';
+import { type AccessToken, RefreshingAuthProvider } from "@twurple/auth";
+import { createLogger } from "./logger";
+import { SQLiteTokenStore } from "./sqlite-token-store";
 
 export interface TokenData {
   accessToken: string;
@@ -27,7 +27,7 @@ export class TokenManager {
   private tokenStore: SQLiteTokenStore;
   private authProviders = new Map<string, RefreshingAuthProvider>();
   private userIds = new Map<string, string>();
-  private logger = createLogger('TokenManager');
+  private logger = createLogger("TokenManager");
   private clientId: string;
   private clientSecret: string;
 
@@ -35,9 +35,7 @@ export class TokenManager {
     this.clientId = config.clientId;
     this.clientSecret = config.clientSecret;
     this.tokenStore = new SQLiteTokenStore(config.dbPath);
-    this.logger.info(
-      `Token database initialized at: ${config.dbPath || './data/tokens.db'}`
-    );
+    this.logger.info(`Token database initialized at: ${config.dbPath || "./data/tokens.db"}`);
   }
 
   async getAuthProvider(name: string): Promise<RefreshingAuthProvider> {
@@ -50,9 +48,7 @@ export class TokenManager {
     // Load from database - sync operation with Bun
     const tokenData = this.tokenStore.getToken(name);
     if (!tokenData) {
-      throw new Error(
-        `No token found for ${name}. Please run the auth server.`
-      );
+      throw new Error(`No token found for ${name}. Please run the auth server.`);
     }
 
     // Create auth provider
@@ -64,11 +60,7 @@ export class TokenManager {
     // Set up auto-save on refresh
     authProvider.onRefresh(async (refreshUserId, newTokenData) => {
       // Use atomic refresh for consistency
-      await this.tokenStore.refreshTokenAtomic(
-        name,
-        newTokenData,
-        refreshUserId
-      );
+      await this.tokenStore.refreshTokenAtomic(name, newTokenData, refreshUserId);
       this.logger.info(`Token refreshed and saved for ${name}`);
     });
 
@@ -80,9 +72,7 @@ export class TokenManager {
 
     // Cache for reuse
     this.authProviders.set(name, authProvider);
-    this.logger.info(
-      `Auth provider created for ${name} with user ID ${userId}`
-    );
+    this.logger.info(`Auth provider created for ${name} with user ID ${userId}`);
 
     return authProvider;
   }
@@ -121,8 +111,8 @@ export class TokenManager {
     this.authProviders.delete(name);
   }
 
-  async refreshToken(type: 'channel' | 'bot', name: string): Promise<void> {
-    const tokenName = type === 'channel' ? 'channel' : name;
+  async refreshToken(type: "channel" | "bot", name: string): Promise<void> {
+    const tokenName = type === "channel" ? "channel" : name;
     const authProvider = await this.getAuthProvider(tokenName);
     // Force a token refresh by getting current user
     await authProvider.getCurrentUserId();
@@ -142,17 +132,15 @@ export class TokenManager {
     for (const { name, token } of allTokens) {
       const tokenData: TokenData = {
         accessToken: token.accessToken,
-        refreshToken: token.refreshToken || '',
-        accessTokenExpiresAt: new Date(
-          Date.now() + (token.expiresIn || 3600) * 1000
-        ).toISOString(),
+        refreshToken: token.refreshToken || "",
+        accessTokenExpiresAt: new Date(Date.now() + (token.expiresIn || 3600) * 1000).toISOString(),
         savedAt: new Date().toISOString(),
         scope: token.scope || [],
         userId: this.getUserId(name),
         channelName: name,
       };
 
-      if (name === 'channel') {
+      if (name === "channel") {
         storage.channel = tokenData;
       } else {
         storage.bots[name] = tokenData;
@@ -166,7 +154,7 @@ export class TokenManager {
     // Save channel token
     if (tokens.channel) {
       this.saveToken(
-        'channel',
+        "channel",
         {
           accessToken: tokens.channel.accessToken,
           refreshToken: tokens.channel.refreshToken,
@@ -174,7 +162,7 @@ export class TokenManager {
           obtainmentTimestamp: Date.now(),
           scope: tokens.channel.scope,
         },
-        tokens.channel.userId
+        tokens.channel.userId,
       );
     }
 
@@ -189,7 +177,7 @@ export class TokenManager {
           obtainmentTimestamp: Date.now(),
           scope: tokenData.scope,
         },
-        tokenData.userId
+        tokenData.userId,
       );
     }
   }

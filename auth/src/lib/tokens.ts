@@ -1,9 +1,9 @@
-import { createLogger } from '@/shared/logger';
-import type { TokenData } from '@/shared/token.service';
-import { TokenManager } from '@/shared/token.service';
-import { env } from '../env';
+import { createLogger } from "@/shared/logger";
+import type { TokenData } from "@/shared/token.service";
+import { TokenManager } from "@/shared/token.service";
+import { env } from "../env";
 
-const logger = createLogger('TokenUtils');
+const logger = createLogger("TokenUtils");
 const tokenManager = new TokenManager({
   clientId: env.TWITCH_CLIENT_ID,
   clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -31,7 +31,7 @@ export function getTokenInfo(token?: TokenData): TokenInfo {
   const isExpired = expiresAt < now;
 
   // Calculate time until expiry
-  let timeUntilExpiry = 'Expired';
+  let timeUntilExpiry = "Expired";
   if (!isExpired) {
     const diff = expiresAt.getTime() - now.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -39,7 +39,7 @@ export function getTokenInfo(token?: TokenData): TokenInfo {
 
     if (hours > 24) {
       const days = Math.floor(hours / 24);
-      timeUntilExpiry = `${days} day${days > 1 ? 's' : ''}`;
+      timeUntilExpiry = `${days} day${days > 1 ? "s" : ""}`;
     } else if (hours > 0) {
       timeUntilExpiry = `${hours}h ${minutes}m`;
     } else {
@@ -72,11 +72,11 @@ export async function getAllTokenInfos(): Promise<{
           acc[name] = getTokenInfo(token);
           return acc;
         },
-        {} as Record<string, TokenInfo>
+        {} as Record<string, TokenInfo>,
       ),
     };
   } catch (error) {
-    logger.error({ err: error }, 'Failed to load token infos');
+    logger.error({ err: error }, "Failed to load token infos");
     return { bots: {} };
   }
 }
@@ -84,23 +84,19 @@ export async function getAllTokenInfos(): Promise<{
 // Format scopes for display
 export function formatScopes(scopes: string[]): string {
   if (!scopes || scopes.length === 0) {
-    return 'None (public access only)';
+    return "None (public access only)";
   }
 
-  return scopes
-    .map((scope) => scope.replace(/_/g, ' ').replace(/:/g, ': '))
-    .join(', ');
+  return scopes.map((scope) => scope.replace(/_/g, " ").replace(/:/g, ": ")).join(", ");
 }
 
 // Get scope type
-export function getScopeType(
-  scopes: string[]
-): 'channel' | 'bot' | 'moderator' {
-  if (scopes.some((s) => s.includes('moderator'))) {
-    return 'moderator';
+export function getScopeType(scopes: string[]): "channel" | "bot" | "moderator" {
+  if (scopes.some((s) => s.includes("moderator"))) {
+    return "moderator";
   }
-  if (scopes.includes('chat:read') || scopes.includes('chat:edit')) {
-    return 'bot';
+  if (scopes.includes("chat:read") || scopes.includes("chat:edit")) {
+    return "bot";
   }
-  return 'channel';
+  return "channel";
 }

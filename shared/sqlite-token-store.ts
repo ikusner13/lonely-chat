@@ -1,13 +1,13 @@
-import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import type { AccessToken } from '@twurple/auth';
-import { env } from './env';
-import { createLogger } from './logger';
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { AccessToken } from "@twurple/auth";
+import { env } from "./env";
+import { createLogger } from "./logger";
 
 export class SQLiteTokenStore {
   private db: Database;
-  private logger = createLogger('SQLiteTokenStore');
+  private logger = createLogger("SQLiteTokenStore");
 
   constructor(dbPath: string = env.TOKEN_DB_PATH) {
     // Ensure directory exists
@@ -20,7 +20,7 @@ export class SQLiteTokenStore {
     this.db = new Database(dbPath, { create: true });
 
     // Enable WAL mode for better concurrency
-    this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec("PRAGMA journal_mode = WAL");
 
     // Initialize schema
     this.initializeSchema();
@@ -44,7 +44,7 @@ export class SQLiteTokenStore {
   }
 
   getToken(name: string): AccessToken | null {
-    const query = this.db.query('SELECT * FROM tokens WHERE name = ?');
+    const query = this.db.query("SELECT * FROM tokens WHERE name = ?");
     const row = query.get(name) as any;
 
     if (!row) {
@@ -56,7 +56,7 @@ export class SQLiteTokenStore {
       refreshToken: row.refresh_token,
       expiresIn: row.expires_in || 0,
       obtainmentTimestamp: row.obtainment_timestamp || 0,
-      scope: row.scopes ? row.scopes.split(',') : [],
+      scope: row.scopes ? row.scopes.split(",") : [],
     };
   }
 
@@ -80,13 +80,13 @@ export class SQLiteTokenStore {
       token.refreshToken,
       token.expiresIn || 0,
       token.obtainmentTimestamp || Date.now(),
-      token.scope?.join(',') || '',
-      userId || null
+      token.scope?.join(",") || "",
+      userId || null,
     );
   }
 
   getAllTokens(): Array<{ name: string; token: AccessToken }> {
-    const query = this.db.query('SELECT * FROM tokens ORDER BY name');
+    const query = this.db.query("SELECT * FROM tokens ORDER BY name");
     const rows = query.all() as any[];
 
     return rows.map((row) => ({
@@ -96,29 +96,29 @@ export class SQLiteTokenStore {
         refreshToken: row.refresh_token,
         expiresIn: row.expires_in || 0,
         obtainmentTimestamp: row.obtainment_timestamp || 0,
-        scope: row.scopes ? row.scopes.split(',') : [],
+        scope: row.scopes ? row.scopes.split(",") : [],
       },
     }));
   }
 
   deleteToken(name: string): void {
-    this.logger.info({ name }, 'Attempting to delete token from SQLite');
-    const query = this.db.prepare('DELETE FROM tokens WHERE name = ?');
+    this.logger.info({ name }, "Attempting to delete token from SQLite");
+    const query = this.db.prepare("DELETE FROM tokens WHERE name = ?");
     const result = query.run(name);
-    this.logger.info({ name, changes: result.changes }, 'Delete query executed');
+    this.logger.info({ name, changes: result.changes }, "Delete query executed");
     if (result.changes === 0) {
-      this.logger.warn({ name }, 'No token found to delete');
+      this.logger.warn({ name }, "No token found to delete");
     }
   }
 
   hasTokens(): boolean {
-    const query = this.db.query('SELECT COUNT(*) as count FROM tokens');
+    const query = this.db.query("SELECT COUNT(*) as count FROM tokens");
     const result = query.get() as any;
     return result.count > 0;
   }
 
   getUserId(name: string): string | null {
-    const query = this.db.query('SELECT user_id FROM tokens WHERE name = ?');
+    const query = this.db.query("SELECT user_id FROM tokens WHERE name = ?");
     const row = query.get(name) as any;
     return row?.user_id || null;
   }
@@ -129,7 +129,7 @@ export class SQLiteTokenStore {
       // Log the old token for audit
       const oldToken = this.getToken(name);
       if (oldToken) {
-        this.logger.info({ name }, 'Refreshing token');
+        this.logger.info({ name }, "Refreshing token");
       }
 
       // Save new token

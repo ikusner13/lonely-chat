@@ -1,16 +1,12 @@
-import { Hono } from 'hono';
-import { createLogger } from '@/shared/logger';
-import { TokenManager } from '@/shared/token.service';
-import { Layout } from '../components/layout';
-import { env } from '../env';
-import {
-  exchangeCodeForTokens,
-  generateAuthUrl,
-  getUserInfo,
-} from '../lib/oauth';
+import { Hono } from "hono";
+import { createLogger } from "@/shared/logger";
+import { TokenManager } from "@/shared/token.service";
+import { Layout } from "../components/layout";
+import { env } from "../env";
+import { exchangeCodeForTokens, generateAuthUrl, getUserInfo } from "../lib/oauth";
 
 const moderatorRoutes = new Hono();
-const logger = createLogger('ModeratorAuth');
+const logger = createLogger("ModeratorAuth");
 const tokenManager = new TokenManager({
   clientId: env.TWITCH_CLIENT_ID,
   clientSecret: env.TWITCH_CLIENT_SECRET,
@@ -18,8 +14,8 @@ const tokenManager = new TokenManager({
 });
 
 // Start moderator auth flow
-moderatorRoutes.get('/new', (c) => {
-  const botName = c.req.query('name');
+moderatorRoutes.get("/new", (c) => {
+  const botName = c.req.query("name");
 
   if (!botName) {
     return c.html(
@@ -31,19 +27,18 @@ moderatorRoutes.get('/new', (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 
-  const authUrl = generateAuthUrl('moderator', botName);
+  const authUrl = generateAuthUrl("moderator", botName);
 
   return c.html(
     <Layout title={`Generate Moderator Bot Token: ${botName}`}>
       <div class="card">
         <h2>Generate Moderator Bot Token: {botName}</h2>
         <p style="margin-bottom: 1rem;">
-          This will generate a token for <strong>{botName}</strong> with
-          moderator privileges.
+          This will generate a token for <strong>{botName}</strong> with moderator privileges.
         </p>
         <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 1rem; border-radius: 0.375rem; margin-bottom: 1rem;">
           <strong>⚠️ Warning:</strong> This bot will have the ability to:
@@ -56,8 +51,7 @@ moderatorRoutes.get('/new', (c) => {
           </ul>
         </div>
         <p style="margin-bottom: 1rem;">
-          Required scopes: <code>chat:read</code>, <code>chat:edit</code>, plus
-          all moderator scopes
+          Required scopes: <code>chat:read</code>, <code>chat:edit</code>, plus all moderator scopes
         </p>
         <p style="margin-bottom: 1rem; color: #dc2626;">
           <strong>Important:</strong>
@@ -70,15 +64,15 @@ moderatorRoutes.get('/new', (c) => {
           Authenticate Moderator Bot
         </a>
       </div>
-    </Layout>
+    </Layout>,
   );
 });
 
 // Handle OAuth callback
-moderatorRoutes.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  const state = c.req.query('state');
-  const botName = c.req.query('botName') || state?.split(':')[1];
+moderatorRoutes.get("/callback", async (c) => {
+  const code = c.req.query("code");
+  const state = c.req.query("state");
+  const botName = c.req.query("botName") || state?.split(":")[1];
 
   if (!(code && botName)) {
     return c.html(
@@ -90,7 +84,7 @@ moderatorRoutes.get('/callback', async (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 
@@ -99,10 +93,10 @@ moderatorRoutes.get('/callback', async (c) => {
     const tokenData = await exchangeCodeForTokens(code);
 
     // Verify moderator scopes were granted
-    const hasModScopes = tokenData.scope.some((s) => s.includes('moderator'));
+    const hasModScopes = tokenData.scope.some((s) => s.includes("moderator"));
     if (!hasModScopes) {
       throw new Error(
-        'Moderator scopes were not granted. Make sure the bot is a moderator in your channel.'
+        "Moderator scopes were not granted. Make sure the bot is a moderator in your channel.",
       );
     }
 
@@ -129,7 +123,7 @@ moderatorRoutes.get('/callback', async (c) => {
         username: userInfo.username,
         scopes: tokenData.scope,
       },
-      'Moderator bot token saved successfully'
+      "Moderator bot token saved successfully",
     );
 
     return c.html(
@@ -146,7 +140,7 @@ moderatorRoutes.get('/callback', async (c) => {
             <strong>Granted moderator scopes:</strong>
             <ul style="margin-top: 0.5rem; margin-left: 1.5rem; font-family: monospace; font-size: 0.875rem;">
               {tokenData.scope
-                .filter((s) => s.includes('moderator'))
+                .filter((s) => s.includes("moderator"))
                 .map((scope) => (
                   <li key={scope}>{scope}</li>
                 ))}
@@ -158,28 +152,23 @@ moderatorRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   } catch (error) {
-    logger.error({ err: error }, 'Failed to save moderator token');
+    logger.error({ err: error }, "Failed to save moderator token");
 
     return c.html(
       <Layout title="Authentication Failed">
         <div class="error">
           <h2>Authentication Failed</h2>
           <p>Failed to exchange authorization code for tokens.</p>
-          <p>
-            Error: {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
-          {error instanceof Error && error.message.includes('moderator') && (
+          <p>Error: {error instanceof Error ? error.message : "Unknown error"}</p>
+          {error instanceof Error && error.message.includes("moderator") && (
             <div style="background-color: #fee2e2; border: 1px solid #f87171; padding: 1rem; border-radius: 0.375rem; margin: 1rem 0;">
               <strong>Make sure:</strong>
               <ul style="margin-top: 0.5rem; margin-left: 1.5rem;">
                 <li>The bot account is a moderator in your channel</li>
-                <li>
-                  You're logging in with the bot account, not your channel
-                  account
-                </li>
+                <li>You're logging in with the bot account, not your channel account</li>
                 <li>You approved all requested permissions</li>
               </ul>
             </div>
@@ -193,15 +182,15 @@ moderatorRoutes.get('/callback', async (c) => {
             </a>
           </div>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 });
 
 // Refresh existing moderator token
-moderatorRoutes.get('/:name', (c) => {
-  const botName = c.req.param('name');
-  const authUrl = generateAuthUrl('moderator', botName);
+moderatorRoutes.get("/:name", (c) => {
+  const botName = c.req.param("name");
+  const authUrl = generateAuthUrl("moderator", botName);
 
   try {
     const tokens = tokenManager.loadTokens();
@@ -217,7 +206,7 @@ moderatorRoutes.get('/:name', (c) => {
               Back to Dashboard
             </a>
           </div>
-        </Layout>
+        </Layout>,
       );
     }
 
@@ -226,7 +215,7 @@ moderatorRoutes.get('/:name', (c) => {
         <div class="card">
           <h2>Refresh Moderator Token: {botName}</h2>
           <p style="margin-bottom: 1rem;">
-            Current token for <strong>{botName}</strong> expires at:{' '}
+            Current token for <strong>{botName}</strong> expires at:{" "}
             {new Date(existingToken.accessTokenExpiresAt).toLocaleString()}
           </p>
           <p style="margin-bottom: 1rem;">
@@ -236,10 +225,10 @@ moderatorRoutes.get('/:name', (c) => {
             Refresh Moderator Token
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   } catch (error) {
-    logger.error({ err: error }, 'Failed to load moderator token');
+    logger.error({ err: error }, "Failed to load moderator token");
     return c.html(
       <Layout title="Error Loading Token">
         <div class="error">
@@ -249,7 +238,7 @@ moderatorRoutes.get('/:name', (c) => {
             Back to Dashboard
           </a>
         </div>
-      </Layout>
+      </Layout>,
     );
   }
 });

@@ -1,25 +1,19 @@
-import { createLogger } from '@/shared/logger';
-import type { TokenManager } from '@/shared/token.service';
-import type { AIService } from './ai.service';
-import { createAllBots } from './bot-factory';
-import type { ChatMessage } from './chat-listener.service';
-import type { ChatbotService } from './chatbot.service';
-import type { BotConfig, ConfigManager } from './config-manager';
-import type { ModeratorBotService } from './moderatorbot.service';
+import { createLogger } from "@/shared/logger";
+import type { TokenManager } from "@/shared/token.service";
+import type { AIService } from "./ai.service";
+import { createAllBots } from "./bot-factory";
+import type { ChatMessage } from "./chat-listener.service";
+import type { ChatbotService } from "./chatbot.service";
+import type { BotConfig, ConfigManager } from "./config-manager";
+import type { ModeratorBotService } from "./moderatorbot.service";
 
 export class BotManager {
   private bots: Map<string, ChatbotService> = new Map();
   private moderatorBot: ModeratorBotService | undefined;
-  private logger = createLogger('BotManager');
+  private logger = createLogger("BotManager");
 
-  async initialize(
-    tokenManager: TokenManager,
-    configManager: ConfigManager
-  ): Promise<void> {
-    const { bots, moderatorBot } = await createAllBots(
-      tokenManager,
-      configManager
-    );
+  async initialize(tokenManager: TokenManager, configManager: ConfigManager): Promise<void> {
+    const { bots, moderatorBot } = await createAllBots(tokenManager, configManager);
     this.bots = bots;
     this.moderatorBot = moderatorBot;
   }
@@ -41,7 +35,7 @@ export class BotManager {
     // Disconnect moderator bot if it exists
     if (this.moderatorBot) {
       this.moderatorBot.leaveChannel();
-      this.logger.info('👮 Moderator bot disconnected');
+      this.logger.info("👮 Moderator bot disconnected");
     }
 
     // Disconnect regular bots

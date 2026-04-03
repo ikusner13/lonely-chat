@@ -5,6 +5,7 @@ This directory contains the bot configuration file.
 ## Setup
 
 1. Copy the example configuration:
+
    ```bash
    cp bots.toml.example bots.toml
    ```

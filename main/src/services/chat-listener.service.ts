@@ -1,12 +1,12 @@
-import { ChatClient, type ChatUser } from '@twurple/chat';
-import { EventEmitter } from 'tseep';
-import { createLogger } from '@/shared/logger';
-import { env } from '../env';
+import { ChatClient, type ChatUser } from "@twurple/chat";
+import { EventEmitter } from "tseep";
+import { createLogger } from "@/shared/logger";
+import { env } from "../env";
 
 export const ROLES = {
-  moderator: 'moderator',
-  broadcaster: 'broadcaster',
-  user: 'user',
+  moderator: "moderator",
+  broadcaster: "broadcaster",
+  user: "user",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -21,7 +21,7 @@ export class ChatListenerService extends EventEmitter<{
   message: (message: ChatMessage) => void;
 }> {
   private readonly client: ChatClient;
-  private readonly logger = createLogger('ChatListenerService');
+  private readonly logger = createLogger("ChatListenerService");
 
   constructor() {
     super();
@@ -32,20 +32,20 @@ export class ChatListenerService extends EventEmitter<{
   }
 
   start(): void {
-    this.logger.info('👂 Chat listener started');
+    this.logger.info("👂 Chat listener started");
     this.client.connect();
     this.handleMessage();
   }
 
   stop(): void {
-    this.logger.info('🔇 Chat listener stopped');
+    this.logger.info("🔇 Chat listener stopped");
     this.client.quit();
-    this.removeAllListeners('message');
+    this.removeAllListeners("message");
   }
 
   private handleMessage(): void {
     this.client.onMessage((_channel, user, message, msg) => {
-      this.emit('message', {
+      this.emit("message", {
         user,
         message,
         role: this.determineRole(msg.userInfo),

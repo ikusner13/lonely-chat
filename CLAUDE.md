@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Lonely Chat** - AI-powered Twitch chat bots to solve loneliness by creating engaging, personality-driven conversations in stream chats.
 
 ### Core Features
+
 - AI-powered bots with distinct personalities that engage naturally in Twitch chat
 - Uses Vercel AI SDK v5 with OpenRouter for diverse model support
 - Multiple bots that participate as regular chat members
@@ -20,18 +21,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Runtime**: Bun (v1.2.19+)
 - **Language**: TypeScript
-- **Framework**: Hono (for auth server)
+- **Effect**: Effect v4 (4.0.0-beta.43) — services, layers, PubSub, Queue, Schema, SQL
+- **Framework**: Hono (for auth dashboard/API)
 - **Twitch Integration**: Twurple (auth, chat, eventsub)
 - **AI Framework**: Vercel AI SDK v5 with OpenRouter provider
 - **AI Models**: Access to multiple models (Llama, Claude, GPT-4, Gemini, DeepSeek)
 - **Configuration**: TOML format with hot-reload support
-- **Logging**: Pino with pretty-print
 - **Build Tool**: tsdown for production builds
 - **Container**: Docker with multi-stage builds
+
+<!-- effect-solutions:start -->
+
+## Effect Best Practices
+
+**IMPORTANT:** Always consult effect-solutions before writing Effect code.
+
+1. Run `effect-solutions list` to see available guides
+2. Run `effect-solutions show <topic>...` for relevant patterns (supports multiple topics)
+3. Search `.references/effect-smol` for real implementations (local clone of Effect v4 source)
+
+Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli.
+
+Never guess at Effect patterns - check the guide first.
+
+<!-- effect-solutions:end -->
 
 ## Project Structure
 
 ### Main Application (`/main`)
+
 - `/main/src/index.ts` - Entry point with signal handling for config reload
 - `/main/src/app.ts` - Application coordinator that wires all services
 - `/main/src/services/`
@@ -48,6 +66,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `config-manager.ts` - Handles bot configuration with hot-reload support
 
 ### Auth Server (`/auth`)
+
 - `/auth/src/index.ts` - Auth server entry with localtunnel for OAuth
 - `/auth/src/app.tsx` - Hono app with dashboard and API routes
 - `/auth/src/components/` - React-like components for dashboard UI
@@ -55,16 +74,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `/auth/src/lib/oauth.ts` - Twitch OAuth implementation
 
 ### Shared Code (`/shared`)
+
 - `env.ts` - Environment variable validation with zod
 - `logger.ts` - Pino logger factory
 - `sqlite-token-store.ts` - SQLite-based token persistence
 - `token.service.ts` - Token management and validation
 
 ### Configuration (`/config`)
+
 - `bots.toml` - Bot configuration (personalities, models, settings)
 - `bots.toml.example` - Example configuration with 4 sample bots
 
 ### Docker Setup
+
 - `docker-compose.local.yml` - Local development setup
 - `docker-compose.production.yml` - Production deployment with ghcr.io images
 - `main/Dockerfile` - Multi-stage build for main app
@@ -156,6 +178,7 @@ bun run docker:shell    # Access container shell
 ## Environment Variables
 
 ### Required
+
 ```
 TWITCH_CLIENT_ID=your_client_id
 TWITCH_CLIENT_SECRET=your_client_secret
@@ -165,6 +188,7 @@ OPENROUTER_KEY=your_openrouter_api_key
 ```
 
 ### Optional
+
 ```
 # Development only
 LOCALTUNNEL_SUBDOMAIN=stable-subdomain-for-oauth

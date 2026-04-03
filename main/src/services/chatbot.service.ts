@@ -1,9 +1,9 @@
-import type { RefreshingAuthProvider } from '@twurple/auth';
-import { ChatClient } from '@twurple/chat';
-import { createLogger } from '@/shared/logger';
-import type { TokenManager } from '@/shared/token.service';
-import { env } from '../env';
-import type { BotConfig } from './config-manager';
+import type { RefreshingAuthProvider } from "@twurple/auth";
+import { ChatClient } from "@twurple/chat";
+import { createLogger } from "@/shared/logger";
+import type { TokenManager } from "@/shared/token.service";
+import { env } from "../env";
+import type { BotConfig } from "./config-manager";
 
 export class ChatbotService {
   private readonly bot: ChatClient;
@@ -11,13 +11,13 @@ export class ChatbotService {
   private readonly twitchChannel = env.TWITCH_CHANNEL_NAME;
   private readonly botName_: string;
   private config: BotConfig;
-  private logger = createLogger('ChatbotService');
+  private logger = createLogger("ChatbotService");
 
   private constructor(
     authProvider: RefreshingAuthProvider,
     bot: ChatClient,
     botName: string,
-    config: BotConfig
+    config: BotConfig,
   ) {
     this.authProvider_ = authProvider;
     this.bot = bot;
@@ -28,7 +28,7 @@ export class ChatbotService {
   static async create(
     tokenManager: TokenManager,
     botName: string,
-    config: BotConfig
+    config: BotConfig,
   ): Promise<ChatbotService> {
     try {
       const authProvider = await tokenManager.getAuthProvider(botName);
@@ -41,7 +41,7 @@ export class ChatbotService {
       return new ChatbotService(authProvider, bot, botName, config);
     } catch (error) {
       throw new Error(
-        `Failed to create ChatbotService: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to create ChatbotService: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
   }
@@ -72,7 +72,7 @@ export class ChatbotService {
 
   connectAndIntroduce(): void {
     this.joinChannel();
-    this.say(this.config.introMessage ?? '👋');
+    this.say(this.config.introMessage ?? "👋");
   }
 
   updateConfig(newConfig: BotConfig): void {

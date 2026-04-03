@@ -1,9 +1,9 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 // Simplified schema - no redundant name field
 export const BotSchema = z.object({
   // AI model configuration
-  model: z.string().default('deepseek/deepseek-chat-v3-0324:free'),
+  model: z.string().default("deepseek/deepseek-chat-v3-0324:free"),
   fallbackModels: z.array(z.string()).optional(),
 
   // Personality
@@ -20,10 +20,10 @@ export type Bot = z.infer<typeof BotSchema>;
 
 // Available AI models as constants for easy reference
 export const AI_MODELS = {
-  DEEPSEEK_FREE: 'deepseek/deepseek-chat-v3-0324:free',
-  KIMI_FREE: 'moonshotai/kimi-k2:free',
-  MISTRAL_FREE: 'mistralai/mistral-nemo:free',
-  DOLPHIN_FREE: 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free',
+  DEEPSEEK_FREE: "deepseek/deepseek-chat-v3-0324:free",
+  KIMI_FREE: "moonshotai/kimi-k2:free",
+  MISTRAL_FREE: "mistralai/mistral-nemo:free",
+  DOLPHIN_FREE: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
 } as const;
 
 // Simple bot definitions - only specify what's different from defaults
@@ -47,7 +47,7 @@ export const BOTS = {
 - NO emojis, NO action tags (*action*), NO quotes
 - When mentioned (@geneJacqueman), respond TO THEM by name`,
     temperature: 1.0,
-    introMessage: 'Bonjour, je suis Gene Jacqueman',
+    introMessage: "Bonjour, je suis Gene Jacqueman",
     fallbackModels: [AI_MODELS.MISTRAL_FREE, AI_MODELS.KIMI_FREE],
   },
 

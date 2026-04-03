@@ -18,3 +18,9 @@ dist/
 
 # config
 config/bots.toml
+
+# references
+.references/
+
+# typescript incremental
+*.tsbuildinfo
