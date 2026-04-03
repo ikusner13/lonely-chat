@@ -99,6 +99,10 @@ CI_ERRORS_FILE="$OUT_DIR/ci-errors.md"
 AGENT_TIMEOUT_FILE="$OUT_DIR/agent-timeout.md"
 mkdir -p "$OUT_DIR"
 
+log() {
+  echo "[codex-auto] $*"
+}
+
 require_command() {
   local cmd="$1"
 
@@ -210,7 +214,11 @@ EOF
 }
 
 run_agent() {
-  rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE"
+  local iteration="$1"
+  local agent_log_file="$OUT_DIR/codex.$iteration.log"
+
+  rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE" "$agent_log_file"
+  log "starting Codex iteration $iteration; raw log: $agent_log_file"
 
   codex exec \
     --dangerously-bypass-approvals-and-sandbox \
@@ -220,7 +228,7 @@ run_agent() {
     --cd "$ROOT" \
     --output-schema "$SCHEMA_FILE" \
     --output-last-message "$RESULT_FILE" \
-    - < "$PROMPT_FILE" &
+    - < "$PROMPT_FILE" >"$agent_log_file" 2>&1 &
   local agent_pid="$!"
 
   (
@@ -250,15 +258,16 @@ EOF
   wait "$watchdog_pid" >/dev/null 2>&1 || true
 
   if [[ -f "$AGENT_TIMEOUT_FILE" ]]; then
-    echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE" >&2
+    echo "codex exec timed out after ${AGENT_TIMEOUT_SECONDS}s; see $AGENT_TIMEOUT_FILE and $agent_log_file" >&2
     return 124
   fi
 
   if [[ ! -f "$RESULT_FILE" ]]; then
-    echo "codex exec exited without writing $RESULT_FILE" >&2
+    echo "codex exec exited without writing $RESULT_FILE; see $agent_log_file" >&2
     return 1
   fi
 
+  log "finished Codex iteration $iteration"
   return "$agent_status"
 }
 
@@ -342,7 +351,7 @@ while :; do
   fi
 
   build_prompt "$iteration"
-  if ! run_agent; then
+  if ! run_agent "$iteration"; then
     exit $?
   fi
   append_progress "$iteration"
@@ -363,6 +372,7 @@ while :; do
   fi
 
   if ! run_checks "$iteration"; then
+    log "verification failed for $slice; see $CI_ERRORS_FILE"
     if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
       echo "slice $slice failed verification $attempts_for_slice time(s); stopping" >&2
       exit 3
@@ -380,11 +390,11 @@ while :; do
     last_selected_slice=""
 
     if [[ -n "$TASK_OVERRIDE" ]]; then
-      echo "completed $slice"
+      log "completed $slice"
       exit 0
     fi
 
-    echo "completed $slice ($completed_slices slice(s) done)"
+    log "completed $slice ($completed_slices slice(s) done)"
     iteration=$((iteration + 1))
     continue
   fi
