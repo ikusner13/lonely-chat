@@ -10,6 +10,8 @@ SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
 AGENT_TIMEOUT_SECONDS="${CODEX_AGENT_TIMEOUT_SECONDS:-900}"
 MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-6}"
 HEARTBEAT_SECONDS="${CODEX_HEARTBEAT_SECONDS:-15}"
+CODEX_PREVIEW_LINES="${CODEX_PREVIEW_LINES:-6}"
+SHOW_CODEX_PREVIEW="${CODEX_SHOW_PREVIEW:-true}"
 MAX_ITERATIONS=0
 RUN_PACK=false
 NO_COMMIT=false
@@ -63,6 +65,14 @@ while [[ $# -gt 0 ]]; do
       MAX_ATTEMPTS_PER_SLICE="$2"
       shift 2
       ;;
+    --codex-preview-lines)
+      CODEX_PREVIEW_LINES="$2"
+      shift 2
+      ;;
+    --no-codex-preview)
+      SHOW_CODEX_PREVIEW=false
+      shift
+      ;;
     --status)
       if [[ -f ".codex-auto/status.json" ]]; then
         cat ".codex-auto/status.json"
@@ -88,6 +98,9 @@ Options:
   --agent-timeout-seconds Stop a single Codex run after n seconds (default: 900)
   --max-attempts-per-slice
                          Stop after n unfinished attempts on the same slice (default: 6)
+  --codex-preview-lines <n>
+                         Show the last n non-empty Codex log lines on heartbeat (default: 6)
+  --no-codex-preview     Hide live Codex log excerpts in the terminal
   --status                Print the current `.codex-auto/status.json` and exit
   --help                  Show this message
 EOF
@@ -146,6 +159,31 @@ write_status() {
       log_file: ($log_file | if . == "" then null else . end),
       updated_at: $updated_at
     }' > "$STATUS_FILE"
+}
+
+print_codex_preview() {
+  local agent_log_file="$1"
+  local preview
+
+  if [[ "$SHOW_CODEX_PREVIEW" != true || ! -f "$agent_log_file" ]]; then
+    return 0
+  fi
+
+  preview="$(
+    tail -n $((CODEX_PREVIEW_LINES * 6)) "$agent_log_file" 2>/dev/null \
+      | sed '/^[[:space:]]*$/d' \
+      | tail -n "$CODEX_PREVIEW_LINES"
+  )"
+
+  if [[ -z "$preview" || "$preview" == "$LAST_CODEX_PREVIEW" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    echo "[codex-auto][codex] $line"
+  done <<< "$preview"
+
+  LAST_CODEX_PREVIEW="$preview"
 }
 
 require_command() {
@@ -264,6 +302,7 @@ EOF
 run_agent() {
   local iteration="$1"
   local agent_log_file="$OUT_DIR/codex.$iteration.log"
+  LAST_CODEX_PREVIEW=""
 
   rm -f "$RESULT_FILE" "$AGENT_TIMEOUT_FILE" "$agent_log_file"
   log "starting Codex iteration $iteration; raw log: $agent_log_file"
@@ -318,6 +357,9 @@ EOF
       delta=$((current_size - previous_size))
       previous_size="$current_size"
       log "Codex iteration $iteration still running; pid=$agent_pid log_bytes=$current_size delta_bytes=$delta raw_log=$agent_log_file"
+      if (( delta > 0 )); then
+        print_codex_preview "$agent_log_file"
+      fi
       write_status \
         "running_codex" \
         "$iteration" \
@@ -331,7 +373,9 @@ EOF
   local heartbeat_pid="$!"
   local agent_status=0
 
-  if ! wait "$agent_pid"; then
+  if wait "$agent_pid"; then
+    agent_status=0
+  else
     agent_status="$?"
   fi
 
@@ -448,8 +492,11 @@ while :; do
   fi
 
   build_prompt "$iteration"
-  if ! run_agent "$iteration"; then
-    exit $?
+  if run_agent "$iteration"; then
+    :
+  else
+    agent_exit="$?"
+    exit "$agent_exit"
   fi
   append_progress "$iteration"
 
