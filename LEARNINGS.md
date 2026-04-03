@@ -25,3 +25,4 @@ Do not add:
 
 - Async test code should use `async` and `await`. The repo lint config explicitly disables `no-async-await` in `vite.config.ts` because it conflicted with `typescript-eslint(promise-function-async)`.
 - A slice is not complete until its checkbox is updated in `specs/implementation-tasks.md`.
+- Use `vp run test`, not `vp test`, when a slice relies on the repo's own Bun-runtime Vitest command. `vp test` uses the Vite+ test runner path, while `vp run test` respects the package script `bun ./node_modules/vitest/vitest.mjs run`.

@@ -16,7 +16,7 @@ vp lint         # lint only (type-aware enabled in config)
 vp fmt          # format only
 vp dev          # dev server
 vp pack         # production build
-vp test         # run tests
+vp run test     # run the repo's Bun-driven test command
 ```
 
 ## Implementation Workflow
@@ -65,7 +65,7 @@ Do not create a new roadmap when the checklist already exists.
 For implementation slices, run the verification listed on the selected task. At minimum, this usually includes:
 
 - `vp check`
-- targeted `vp test`
+- targeted `vp run test`
 - `vp pack` when the slice changes app wiring or production build shape
 - any manual smoke check listed on the task
 

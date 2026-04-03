@@ -16,7 +16,7 @@ Use it with:
 - Spec inputs: `specs/overview.md`, `specs/architecture.md`, `CLAUDE.md`
 - Verify: health endpoint test, dashboard shell test, `vp check`, `vp test`, `vp pack`
 
-### [ ] TB-02: Add SQLite runtime and migration runner
+### [x] TB-02: Add SQLite runtime and migration runner
 
 - Depends on: `TB-01`
 - Outcome: App starts with SQLite configured, migrations run cleanly, and a smoke test proves the DB is reachable.
