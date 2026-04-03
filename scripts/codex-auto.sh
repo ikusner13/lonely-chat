@@ -8,6 +8,7 @@ MODEL="${CODEX_MODEL:-gpt-5.4}"
 REASONING="${CODEX_REASONING:-high}"
 SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
 AGENT_TIMEOUT_SECONDS="${CODEX_AGENT_TIMEOUT_SECONDS:-900}"
+MAX_ATTEMPTS_PER_SLICE="${CODEX_MAX_ATTEMPTS_PER_SLICE:-3}"
 MAX_ITERATIONS=0
 RUN_PACK=false
 NO_COMMIT=false
@@ -57,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       AGENT_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
+    --max-attempts-per-slice)
+      MAX_ATTEMPTS_PER_SLICE="$2"
+      shift 2
+      ;;
     --help|-h)
       cat <<'EOF'
 Usage: scripts/codex-auto.sh [options]
@@ -67,11 +72,13 @@ Options:
   --pack                  Run `vp pack` after agent execution
   --no-commit             Do not create commits
   --allow-dirty           Skip the clean-worktree preflight check
-  --max-iterations <n>    Stop after n iterations (0 means unlimited)
+  --max-iterations <n>    Stop after n completed slices in auto-select mode (0 means unlimited)
   --model <name>          Override model (default: gpt-5.4)
   --reasoning <level>     Override model reasoning effort (default: high)
   --service-tier <tier>   Override service tier (default: fast)
   --agent-timeout-seconds Stop a single Codex run after n seconds (default: 900)
+  --max-attempts-per-slice
+                         Stop after n unfinished attempts on the same slice (default: 3)
   --help                  Show this message
 EOF
       exit 0
@@ -158,6 +165,11 @@ EOF
     cat >> "$PROMPT_FILE" <<EOF
 
 Implement \`$TASK_OVERRIDE\` instead of auto-selecting.
+EOF
+  else
+    cat >> "$PROMPT_FILE" <<'EOF'
+
+Auto-select the next runnable unchecked task from `specs/implementation-tasks.md`.
 EOF
   fi
 
@@ -318,10 +330,14 @@ require_command vp
 require_clean_worktree
 build_schema
 
+completed_slices=0
+last_selected_slice=""
+attempts_for_slice=0
+
 iteration=1
 while :; do
-  if [[ "$MAX_ITERATIONS" -gt 0 && "$iteration" -gt "$MAX_ITERATIONS" ]]; then
-    echo "reached max iterations: $MAX_ITERATIONS"
+  if [[ -z "$TASK_OVERRIDE" && "$MAX_ITERATIONS" -gt 0 && "$completed_slices" -ge "$MAX_ITERATIONS" ]]; then
+    echo "completed $completed_slices slice(s); reached max iterations: $MAX_ITERATIONS"
     exit 0
   fi
 
@@ -331,24 +347,56 @@ while :; do
   fi
   append_progress "$iteration"
 
+  slice="$(jq -r '.selected_slice' "$RESULT_FILE")"
+  status="$(jq -r '.status' "$RESULT_FILE")"
+
+  if [[ "$slice" == "null" || -z "$slice" ]]; then
+    echo "codex exec returned no selected_slice in $RESULT_FILE" >&2
+    exit 1
+  fi
+
+  if [[ "$slice" == "$last_selected_slice" ]]; then
+    attempts_for_slice=$((attempts_for_slice + 1))
+  else
+    last_selected_slice="$slice"
+    attempts_for_slice=1
+  fi
+
   if ! run_checks "$iteration"; then
+    if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
+      echo "slice $slice failed verification $attempts_for_slice time(s); stopping" >&2
+      exit 3
+    fi
+
     iteration=$((iteration + 1))
     continue
   fi
 
-  slice="$(jq -r '.selected_slice' "$RESULT_FILE")"
-  status="$(jq -r '.status' "$RESULT_FILE")"
-
   commit_if_needed "$iteration" "$slice"
 
   if [[ "$status" == "slice_complete" ]]; then
-    echo "completed $slice"
-    exit 0
+    completed_slices=$((completed_slices + 1))
+    attempts_for_slice=0
+    last_selected_slice=""
+
+    if [[ -n "$TASK_OVERRIDE" ]]; then
+      echo "completed $slice"
+      exit 0
+    fi
+
+    echo "completed $slice ($completed_slices slice(s) done)"
+    iteration=$((iteration + 1))
+    continue
   fi
 
   if [[ "$status" == "blocked" ]]; then
     echo "blocked: $(jq -r '.summary' "$RESULT_FILE")" >&2
     exit 2
+  fi
+
+  if [[ "$attempts_for_slice" -ge "$MAX_ATTEMPTS_PER_SLICE" ]]; then
+    echo "slice $slice returned continue $attempts_for_slice time(s); stopping" >&2
+    exit 3
   fi
 
   iteration=$((iteration + 1))
