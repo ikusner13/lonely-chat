@@ -6,6 +6,7 @@ import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
 const createSettingsMigrationId = 1;
 const createSessionsMigrationId = 2;
 const createBotsMigrationId = 3;
+const createSessionMessagesMigrationId = 4;
 
 const createSettingsTable = Effect.gen(function* createSettingsTable() {
   const sql = yield* SqlClient.SqlClient;
@@ -64,10 +65,30 @@ const createBotsTable = Effect.gen(function* createBotsTable() {
   )`;
 });
 
+const createSessionMessagesTable = Effect.gen(function* createSessionMessagesTable() {
+  const sql = yield* SqlClient.SqlClient;
+
+  yield* sql`CREATE TABLE IF NOT EXISTS session_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    session_id TEXT NOT NULL,
+    bot_id TEXT,
+    username TEXT NOT NULL,
+    content TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    is_bot INTEGER NOT NULL,
+    tokens_used INTEGER,
+    model_used TEXT,
+    sent_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id),
+    FOREIGN KEY (bot_id) REFERENCES bots(id)
+  )`;
+});
+
 const migrationEntries = [
   [createSettingsMigrationId, "create_settings", createSettingsTable],
   [createSessionsMigrationId, "create_sessions", createSessionsTable],
   [createBotsMigrationId, "create_bots", createBotsTable],
+  [createSessionMessagesMigrationId, "create_session_messages", createSessionMessagesTable],
 ] as const;
 
 export const makeMigrationLoader = (): ReturnType<typeof SqliteMigrator.fromRecord> =>

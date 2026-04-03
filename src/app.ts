@@ -23,6 +23,7 @@ import { BotId } from "./bots/bot-record";
 import type { BotEditorFormErrors } from "./bots/bot-editor-fields";
 import type { BotRecord } from "./bots/bot-record";
 import { getDatabasePath, makeDatabaseLayer } from "./db/database";
+import { MockPlatformAdapterLive } from "./platforms/Layers/mock-platform-adapter";
 import { SessionServiceLive } from "./sessions/Layers/session-service";
 import { SessionService } from "./sessions/Services/session-service";
 import type { SessionRecord } from "./sessions/session-record";
@@ -470,11 +471,12 @@ export const makeAppRuntime = (
   dbPath: string,
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
   const databaseLayer = makeDatabaseLayer(dbPath);
+  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provideMerge(MockPlatformAdapterLive));
 
   return ManagedRuntime.make(
     Layer.empty.pipe(
       Layer.provideMerge(FakeAiClientLive),
-      Layer.provideMerge(SessionServiceLive),
+      Layer.provideMerge(sessionServiceLayer),
       Layer.provideMerge(BotServiceLive),
       Layer.provide(databaseLayer),
     ),

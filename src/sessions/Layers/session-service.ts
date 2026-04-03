@@ -1,16 +1,20 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-import { ChannelName } from "../../platforms/Services/platform-adapter";
+import { ChannelName, PlatformAdapter } from "../../platforms/Services/platform-adapter";
+import type { ChatMessage } from "../../platforms/Services/platform-adapter";
 import { SessionService, SessionId } from "../Services/session-service";
 import type {
   SessionEndReason,
   SessionServiceShape,
   SessionStatus,
 } from "../Services/session-service";
+import { SessionMessageId, SessionMessageRecord } from "../session-message-record";
 import { SessionRecord } from "../session-record";
 import { SessionStartError } from "../session-start-error";
 
@@ -29,6 +33,8 @@ interface SessionRow {
   readonly started_at: string;
   readonly status: SessionStatus;
 }
+
+type MessageListenerFiber = Fiber.Fiber<void, SqlError>;
 
 const makeSessionRecord = (row: SessionRow): SessionRecord =>
   new SessionRecord({
@@ -55,10 +61,28 @@ const selectSessionColumns = (
     return makeSessionRecord(session);
   });
 
+const makeSessionMessageRecord = (
+  sessionId: SessionId,
+  message: ChatMessage,
+): SessionMessageRecord =>
+  new SessionMessageRecord({
+    botId: message.botId ?? null,
+    content: message.text,
+    id: SessionMessageId.makeUnsafe(crypto.randomUUID()),
+    isBot: message.direction === "outgoing",
+    modelUsed: null,
+    platform: message.platform,
+    sentAt: new Date().toISOString(),
+    sessionId,
+    tokensUsed: null,
+    username: message.username,
+  });
+
 export const SessionServiceLive = Layer.effect(
   SessionService,
   Effect.gen(function* makeSessionService() {
     const sql = yield* SqlClient.SqlClient;
+    const platformAdapter = yield* PlatformAdapter;
     const activeSessionRef = yield* Ref.make<SessionRecord | null>(
       yield* selectSessionColumns(
         sql<SessionRow>`SELECT id, platform, channel, status, started_at, ended_at, end_reason
@@ -67,6 +91,71 @@ export const SessionServiceLive = Layer.effect(
           ORDER BY started_at DESC
           LIMIT 1`,
       ),
+    );
+    const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
+
+    const persistMessage = Effect.fn("SessionService.persistMessage")(
+      function* persistMessageEffect(sessionId: SessionId, message: ChatMessage) {
+        const storedMessage = makeSessionMessageRecord(sessionId, message);
+
+        yield* sql`INSERT INTO session_messages (
+          id,
+          session_id,
+          bot_id,
+          username,
+          content,
+          platform,
+          is_bot,
+          tokens_used,
+          model_used,
+          sent_at
+        )
+        VALUES (
+          ${storedMessage.id},
+          ${storedMessage.sessionId},
+          ${storedMessage.botId},
+          ${storedMessage.username},
+          ${storedMessage.content},
+          ${storedMessage.platform},
+          ${storedMessage.isBot ? 1 : 0},
+          ${storedMessage.tokensUsed},
+          ${storedMessage.modelUsed},
+          ${storedMessage.sentAt}
+        )`;
+        yield* sql`UPDATE sessions
+        SET total_messages = total_messages + 1
+        WHERE id = ${sessionId}`;
+      },
+    );
+
+    const startMessageListener = Effect.fn("SessionService.startMessageListener")(
+      function* startMessageListenerEffect(session: SessionRecord) {
+        const existingListener = yield* Ref.get(messageListenerRef);
+
+        if (existingListener !== null) {
+          yield* Fiber.interrupt(existingListener);
+        }
+
+        const messageListener = yield* platformAdapter.listenChat(session.channel).pipe(
+          Stream.runForEach((message) => persistMessage(session.id, message)),
+          Effect.forkChild,
+        );
+
+        yield* Ref.set(messageListenerRef, messageListener);
+      },
+    );
+
+    const stopMessageListener = Effect.fn("SessionService.stopMessageListener")(
+      function* stopMessageListenerEffect() {
+        const messageListener = yield* Ref.get(messageListenerRef);
+
+        if (messageListener === null) {
+          return;
+        }
+
+        yield* Fiber.interrupt(messageListener);
+        yield* Ref.set(messageListenerRef, null);
+      },
     );
 
     const getActiveSession = Effect.fn("SessionService.getActiveSession")(
@@ -142,6 +231,7 @@ export const SessionServiceLive = Layer.effect(
           ${null}
         )`;
       yield* Ref.set(activeSessionRef, session);
+      yield* startMessageListener(session);
 
       return session;
     });
@@ -168,6 +258,7 @@ export const SessionServiceLive = Layer.effect(
             ended_at = ${endedSession.endedAt},
             end_reason = ${endedSession.endReason}
         WHERE id = ${endedSession.id}`;
+      yield* stopMessageListener();
       yield* Ref.set(activeSessionRef, null);
 
       return endedSession;

@@ -12,6 +12,7 @@ tokens.db-wal
 
 # logs
 logs/
+.codex-auto/
 
 # build
 dist/

@@ -69,7 +69,7 @@ Use it with:
 
 ## Track 2: Chat and Session Core Slices
 
-### [ ] VS-05: Persist sessions and session messages
+### [x] VS-05: Persist sessions and session messages
 
 - Depends on: `TB-04`
 - Outcome: Starting a session creates a session record, and incoming/outgoing messages are stored with the correct metadata.
