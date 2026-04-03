@@ -97,6 +97,7 @@ Hard requirement: heavily lean on `Schema` and Effect data modeling when adding 
 
 - Prefer `Schema`-backed models over plain TypeScript interfaces for domain objects, validated inputs, persisted records, request/response payloads, form data, and cross-service data contracts.
 - Prefer schema-driven decoding and validation over manual object-shape checks when the data can reasonably be modeled with `Schema`.
+- Never use structural duck typing for request/response payloads, Effect service contracts, decoded data, or third-party/library boundaries. Prefer concrete exported types, `Schema` models, tagged classes, or generated client types; if those do not exist, define an explicit local type/schema instead of probing object shapes with ad-hoc property checks.
 - Use plain TypeScript objects only for trivial render-only view state or glue code that does not cross a boundary and does not benefit from validation or shared modeling.
 
 <!-- effect-solutions:start -->

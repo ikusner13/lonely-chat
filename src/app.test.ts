@@ -74,7 +74,7 @@ const createDatabasePath = Effect.acquireRelease(
 
 const createTestRuntime = (dbPath: string) =>
   Effect.acquireRelease(
-    Effect.sync(() => makeAppRuntime(dbPath)),
+    Effect.sync(() => makeAppRuntime(dbPath, FakeAiClientLive)),
     (runtime) => fromPromise(runtime.dispose()).pipe(Effect.orDie),
   );
 
@@ -370,7 +370,7 @@ describe("app shell", () => {
     Effect.gen(function* servesHealthEndpoint() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
       const response = yield* requestApp(app, "http://localhost/health");
 
       expect(response.status).toBe(okStatus);
@@ -384,7 +384,7 @@ describe("app shell", () => {
     Effect.gen(function* startsAndStopsAMockSessionFromTheDashboard() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
 
       let response = yield* requestApp(app, "http://localhost/");
       const body = yield* fromPromise(response.text());
@@ -427,7 +427,7 @@ describe("app shell", () => {
     Effect.gen(function* rendersActiveCostAlertsOnTheDashboard() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
 
       yield* fromPromise(
         runtime.runPromise(
@@ -463,7 +463,7 @@ describe("app shell", () => {
     Effect.gen(function* rendersPersistedChatHistoryAndStreamsLiveChatUpdates() {
       const dbPath = yield* createDatabasePath;
       const { mockPlatformAdapter, runtime } = yield* createTestRuntimeWithMockPlatform(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
 
       yield* fromPromise(
         runtime.runPromise(SessionService.use((sessionService) => sessionService.startSession())),
@@ -788,7 +788,7 @@ describe("app shell", () => {
     Effect.gen(function* previewsABotResponseThroughThePreviewApi() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
       const storedBot = makeTestBot();
 
       yield* fromPromise(createStoredBot(runtime, storedBot));
@@ -813,7 +813,7 @@ describe("app shell", () => {
     Effect.gen(function* rendersAPreviewResponseInTheBotManagerUi() {
       const dbPath = yield* createDatabasePath;
       const runtime = yield* createTestRuntime(dbPath);
-      const app = createApp(runtime);
+      const app = createApp(runtime, FakeAiClientLive);
       const storedBot = makeTestBot();
 
       yield* fromPromise(createStoredBot(runtime, storedBot));

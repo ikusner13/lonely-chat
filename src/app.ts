@@ -7,8 +7,9 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type * as Config from "effect/Config";
 
-import { FakeAiClientLive } from "./ai/Layers/fake-ai-client";
+import { OpenRouterAiClientLive } from "./ai/Layers/openrouter-ai-client";
 import {
   makeBotPreviewRequest,
   parseBotPreviewInput,
@@ -942,13 +943,14 @@ const renderChatViewerDocument = (state: ChatViewerState): string => {
 
 export const makeAppRuntime = (
   dbPath: string,
+  aiLayer: Layer.Layer<AiClient, Config.ConfigError> = OpenRouterAiClientLive,
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
   const databaseLayer = makeDatabaseLayer(dbPath);
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
   const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
   const sessionServiceDependencies = Layer.mergeAll(
     databaseLayer,
-    FakeAiClientLive,
+    aiLayer,
     MockPlatformAdapterLive,
     botServiceLayer,
     scenarioServiceLayer,
@@ -956,7 +958,7 @@ export const makeAppRuntime = (
   const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionServiceDependencies));
 
   return ManagedRuntime.make(
-    Layer.mergeAll(FakeAiClientLive, botServiceLayer, scenarioServiceLayer, sessionServiceLayer),
+    Layer.mergeAll(aiLayer, botServiceLayer, scenarioServiceLayer, sessionServiceLayer),
   );
 };
 
@@ -964,6 +966,7 @@ export const appRuntime = makeAppRuntime(getDatabasePath());
 
 export const createApp = (
   runtime: ManagedRuntime.ManagedRuntime<AppServices, unknown> = appRuntime,
+  previewAiLayer: Layer.Layer<AiClient, Config.ConfigError> = OpenRouterAiClientLive,
 ): Hono => {
   const app = new Hono();
 
@@ -1123,7 +1126,9 @@ export const createApp = (
       );
     }
 
-    const preview = await runtime.runPromise(previewBot(bot, previewInput.prompt));
+    const preview = await runtime.runPromise(
+      previewBot(bot, previewInput.prompt).pipe(Effect.provide(previewAiLayer)),
+    );
 
     return context.json({
       model: preview.model,
@@ -1229,7 +1234,9 @@ export const createApp = (
       );
     }
 
-    const preview = await runtime.runPromise(previewBot(bot, parsedInput.input.prompt));
+    const preview = await runtime.runPromise(
+      previewBot(bot, parsedInput.input.prompt).pipe(Effect.provide(previewAiLayer)),
+    );
 
     return context.html(
       renderBotManagerDocument(

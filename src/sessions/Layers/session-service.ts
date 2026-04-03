@@ -13,6 +13,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import type { AiGenerationError } from "../../ai/ai-generation-error";
 import { AiClient } from "../../ai/Services/ai-client";
+import type { AiGenerateResponse } from "../../ai/Services/ai-client";
 import type { BotRecord } from "../../bots/bot-record";
 import { BotService } from "../../bots/Services/bot-service";
 import {
@@ -105,6 +106,16 @@ interface ExecutableScenarioStep {
   readonly step: ScenarioStep;
 }
 
+interface PendingGeneratedMessage {
+  readonly botId: PlatformBotId;
+  readonly costUsd: number;
+  readonly modelUsed: string;
+  readonly platform: ChatMessage["platform"];
+  readonly text: string;
+  readonly tokensUsed: number;
+  readonly username: ChatUsername;
+}
+
 const sessionExportCsvHeader = [
   "timestamp",
   "username",
@@ -180,17 +191,18 @@ const makeSessionMessageRecord = (
   sessionId: SessionId,
   message: ChatMessage,
   sentAt: string,
+  metadata?: PendingGeneratedMessage | null,
 ): SessionMessageRecord =>
   new SessionMessageRecord({
     botId: message.botId ?? null,
     content: message.text,
     id: SessionMessageId.makeUnsafe(crypto.randomUUID()),
     isBot: message.direction === "outgoing",
-    modelUsed: null,
+    modelUsed: metadata?.modelUsed ?? null,
     platform: message.platform,
     sentAt,
     sessionId,
-    tokensUsed: null,
+    tokensUsed: metadata?.tokensUsed ?? null,
     username: message.username,
   });
 
@@ -291,6 +303,7 @@ export const SessionServiceLive = Layer.effect(
       const silenceBreakerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
       const lastActivityAtRef = yield* Ref.make<number | null>(null);
+      const pendingGeneratedMessagesRef = yield* Ref.make<readonly PendingGeneratedMessage[]>([]);
 
       const getCurrentTimestamp = Effect.fn("SessionService.getCurrentTimestamp")(
         function* getCurrentTimestampEffect() {
@@ -317,12 +330,50 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const registerPendingGeneratedMessage = Effect.fn(
+        "SessionService.registerPendingGeneratedMessage",
+      )(function* registerPendingGeneratedMessageEffect(message: PendingGeneratedMessage) {
+        yield* Ref.update(pendingGeneratedMessagesRef, (messages) => [...messages, message]);
+      });
+
+      const takePendingGeneratedMessage = Effect.fn("SessionService.takePendingGeneratedMessage")(
+        function* takePendingGeneratedMessageEffect(message: ChatMessage) {
+          if (message.direction !== "outgoing" || message.botId === undefined) {
+            return null;
+          }
+
+          const pendingMessages = yield* Ref.get(pendingGeneratedMessagesRef);
+          const pendingIndex = pendingMessages.findIndex(
+            (pendingMessage) =>
+              pendingMessage.botId === message.botId &&
+              pendingMessage.platform === message.platform &&
+              pendingMessage.text === message.text &&
+              pendingMessage.username === message.username,
+          );
+
+          if (pendingIndex === -1) {
+            return null;
+          }
+
+          const pendingMessage = pendingMessages[pendingIndex] ?? null;
+
+          yield* Ref.set(
+            pendingGeneratedMessagesRef,
+            pendingMessages.filter((_, index) => index !== pendingIndex),
+          );
+
+          return pendingMessage;
+        },
+      );
+
       const persistMessage = Effect.fn("SessionService.persistMessage")(
         function* persistMessageEffect(sessionId: SessionId, message: ChatMessage) {
+          const metadata = yield* takePendingGeneratedMessage(message);
           const storedMessage = makeSessionMessageRecord(
             sessionId,
             message,
             yield* getCurrentTimestamp(),
+            metadata,
           );
 
           yield* sql`INSERT INTO session_messages (
@@ -572,6 +623,7 @@ export const SessionServiceLive = Layer.effect(
         yield* Ref.set(activeSessionRef, null);
         yield* Ref.set(activeAlertsRef, []);
         yield* Ref.set(lastActivityAtRef, null);
+        yield* Ref.set(pendingGeneratedMessagesRef, []);
         yield* Ref.set(speakerStatesRef, []);
 
         return endedSession;
@@ -650,6 +702,67 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const recordCost = Effect.fn("SessionService.recordCost")(function* recordCostEffect(
+        tokensUsed: number,
+        costUsd: number,
+      ) {
+        const activeSession = yield* Ref.get(activeSessionRef);
+
+        if (activeSession === null) {
+          return null;
+        }
+
+        const nextSession = updateSessionRecord(activeSession, {
+          totalCostUsd: activeSession.totalCostUsd + costUsd,
+          totalTokensUsed: activeSession.totalTokensUsed + tokensUsed,
+        });
+
+        yield* sql`UPDATE sessions
+          SET total_tokens_used = ${nextSession.totalTokensUsed},
+              total_cost_usd = ${nextSession.totalCostUsd}
+          WHERE id = ${nextSession.id}`;
+        yield* Ref.set(activeSessionRef, nextSession);
+        yield* emitThresholdAlerts(
+          nextSession,
+          "cost",
+          nextSession.totalCostUsd,
+          nextSession.costLimitUsd,
+        );
+
+        if (
+          nextSession.costLimitUsd !== null &&
+          nextSession.totalCostUsd >= nextSession.costLimitUsd
+        ) {
+          return yield* endSession(sessionCostLimitStatus, "cost_limit");
+        }
+
+        return nextSession;
+      });
+
+      const sendGeneratedMessage = Effect.fn("SessionService.sendGeneratedMessage")(
+        function* sendGeneratedMessageEffect(
+          speakerConnection: {
+            readonly botId: PlatformBotId;
+            readonly channel: SessionRecord["channel"];
+            readonly platform: SessionRecord["platform"];
+            readonly username: ChatUsername;
+          },
+          response: AiGenerateResponse,
+        ) {
+          yield* registerPendingGeneratedMessage({
+            botId: speakerConnection.botId,
+            costUsd: response.costUsd,
+            modelUsed: response.model,
+            platform: speakerConnection.platform,
+            text: response.text,
+            tokensUsed: response.tokensUsed,
+            username: speakerConnection.username,
+          });
+          yield* platformAdapter.sendMessage(speakerConnection, response.text);
+          yield* recordCost(response.tokensUsed, response.costUsd);
+        },
+      );
+
       const runScenarioStep = Effect.fn("SessionService.runScenarioStep")(
         function* runScenarioStepEffect(
           session: SessionRecord,
@@ -678,11 +791,26 @@ export const SessionServiceLive = Layer.effect(
             }
             case "respond": {
               if (bot !== null) {
+                const speakerConnection = {
+                  botId: PlatformBotId.makeUnsafe(bot.id),
+                  channel: session.channel,
+                  platform: session.platform,
+                  username: ChatUsername.makeUnsafe(bot.name),
+                } as const;
+                yield* platformAdapter.connect(speakerConnection);
                 const response = yield* aiClient.generateText(
                   makeScenarioResponseRequest(bot, session.platform, scenario.topic, step.content),
                 );
 
-                yield* sendScenarioMessage(session, bot, response.text);
+                yield* sendGeneratedMessage(speakerConnection, response);
+                yield* Ref.set(
+                  speakerStatesRef,
+                  advanceSpeakerState(
+                    yield* Ref.get(speakerStatesRef),
+                    speakerConnection.botId,
+                    yield* Clock.currentTimeMillis,
+                  ),
+                );
               }
 
               break;
@@ -737,7 +865,7 @@ export const SessionServiceLive = Layer.effect(
 
             const response = yield* aiClient.generateText(request);
 
-            yield* platformAdapter.sendMessage(speakerConnection, response.text);
+            yield* sendGeneratedMessage(speakerConnection, response);
             yield* Ref.set(
               speakerStatesRef,
               advanceSpeakerState(
@@ -951,43 +1079,6 @@ export const SessionServiceLive = Layer.effect(
         return true;
       });
 
-      const recordCost = Effect.fn("SessionService.recordCost")(function* recordCostEffect(
-        tokensUsed: number,
-        costUsd: number,
-      ) {
-        const activeSession = yield* Ref.get(activeSessionRef);
-
-        if (activeSession === null) {
-          return null;
-        }
-
-        const nextSession = updateSessionRecord(activeSession, {
-          totalCostUsd: activeSession.totalCostUsd + costUsd,
-          totalTokensUsed: activeSession.totalTokensUsed + tokensUsed,
-        });
-
-        yield* sql`UPDATE sessions
-          SET total_tokens_used = ${nextSession.totalTokensUsed},
-              total_cost_usd = ${nextSession.totalCostUsd}
-          WHERE id = ${nextSession.id}`;
-        yield* Ref.set(activeSessionRef, nextSession);
-        yield* emitThresholdAlerts(
-          nextSession,
-          "cost",
-          nextSession.totalCostUsd,
-          nextSession.costLimitUsd,
-        );
-
-        if (
-          nextSession.costLimitUsd !== null &&
-          nextSession.totalCostUsd >= nextSession.costLimitUsd
-        ) {
-          return yield* endSession(sessionCostLimitStatus, "cost_limit");
-        }
-
-        return nextSession;
-      });
-
       const startSession = Effect.fn("SessionService.startSession")(function* startSessionEffect(
         options?: SessionStartOptions,
       ) {
@@ -1050,6 +1141,7 @@ export const SessionServiceLive = Layer.effect(
         yield* Ref.set(activeAlertsRef, []);
         yield* Ref.set(speakerStatesRef, []);
         yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
+        yield* Ref.set(pendingGeneratedMessagesRef, []);
         yield* startMessageListener(session);
         yield* startSilenceBreaker(session);
         yield* startSessionTimer(session);

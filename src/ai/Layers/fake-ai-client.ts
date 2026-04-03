@@ -102,8 +102,11 @@ export const makeFakeAiClient = Effect.gen(function* makeFakeAiClient() {
     });
 
     return {
+      costUsd: 0,
       model: request.model,
       text: `${request.botName}: ${response.text}`,
+      tokensUsed:
+        (response.usage.inputTokens.total ?? 0) + (response.usage.outputTokens.total ?? 0),
     };
   });
 

@@ -16,15 +16,25 @@ export interface AiPromptMessage {
   readonly content: string;
 }
 
+export class AiGenerationSettings extends Schema.Class("AiGenerationSettings")({
+  fallbackModels: Schema.Array(AiModelName),
+  maxOutputTokens: Schema.Number,
+  stopSequences: Schema.Array(Schema.String),
+  temperature: Schema.Number,
+}) {}
+
 export interface AiGenerateRequest {
   readonly botName: BotName;
   readonly messages: readonly AiPromptMessage[];
   readonly model: AiModelName;
+  readonly settings?: AiGenerationSettings;
 }
 
 export interface AiGenerateResponse {
+  readonly costUsd: number;
   readonly model: AiModelName;
   readonly text: string;
+  readonly tokensUsed: number;
 }
 
 export interface AiClientShape {

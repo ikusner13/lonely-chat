@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 
 import type { BotRecord } from "../bots/bot-record";
-import { AiModelName, BotName } from "./Services/ai-client";
+import { AiGenerationSettings, AiModelName, BotName } from "./Services/ai-client";
 import type { AiGenerateRequest, AiPromptMessage } from "./Services/ai-client";
 
 export class BotPreviewInput extends Schema.Class("BotPreviewInput")({
@@ -65,6 +65,14 @@ const buildExampleMessages = (bot: BotRecord): readonly AiPromptMessage[] =>
     role: "assistant",
   }));
 
+const buildGenerationSettings = (bot: BotRecord): AiGenerationSettings =>
+  new AiGenerationSettings({
+    fallbackModels: bot.fallbackModels.map((model) => AiModelName.makeUnsafe(model)),
+    maxOutputTokens: bot.maxTokens,
+    stopSequences: ["\n"],
+    temperature: bot.temperature,
+  });
+
 export const parseBotPreviewInput = (prompt: string): ParsedBotPreviewInput => {
   const normalizedPrompt = trimPreviewPrompt(prompt);
   const decodedPrompt = decodeNonEmptyPreviewPrompt(normalizedPrompt);
@@ -112,4 +120,5 @@ export const makeBotPreviewRequest = (
     },
   ],
   model: AiModelName.makeUnsafe(bot.model),
+  settings: buildGenerationSettings(bot),
 });

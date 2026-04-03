@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { AiModelName, BotName } from "../ai/Services/ai-client";
+import { AiGenerationSettings, AiModelName, BotName } from "../ai/Services/ai-client";
 import type { AiGenerateRequest, AiPromptMessage } from "../ai/Services/ai-client";
 import { BotRecord } from "../bots/bot-record";
 import { BotId } from "../platforms/Services/platform-adapter";
@@ -102,6 +102,14 @@ const buildExampleMessages = (bot: BotRecord): readonly AiPromptMessage[] =>
     content: `[example] ${bot.name}: ${message}`,
     role: "assistant",
   }));
+
+const buildGenerationSettings = (bot: BotRecord): AiGenerationSettings =>
+  new AiGenerationSettings({
+    fallbackModels: bot.fallbackModels.map((model) => AiModelName.makeUnsafe(model)),
+    maxOutputTokens: bot.maxTokens,
+    stopSequences: ["\n"],
+    temperature: bot.temperature,
+  });
 
 const formatIncomingMessage = (message: ChatMessage): string =>
   `[external] ${message.username}: ${message.text}`;
@@ -357,6 +365,7 @@ export const makeMentionResponseRequest = (
     },
   ],
   model: AiModelName.makeUnsafe(bot.model),
+  settings: buildGenerationSettings(bot),
 });
 
 export const makeSilenceBreakerRequest = (
@@ -376,6 +385,7 @@ export const makeSilenceBreakerRequest = (
     },
   ],
   model: AiModelName.makeUnsafe(bot.model),
+  settings: buildGenerationSettings(bot),
 });
 
 export const makeScenarioResponseRequest = (
@@ -399,4 +409,5 @@ export const makeScenarioResponseRequest = (
     },
   ],
   model: AiModelName.makeUnsafe(bot.model),
+  settings: buildGenerationSettings(bot),
 });

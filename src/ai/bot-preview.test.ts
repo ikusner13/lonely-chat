@@ -90,6 +90,12 @@ Stay clipped and in character.`,
         },
       ],
       model: "openai/gpt-5-mini",
+      settings: {
+        fallbackModels: ["openai/gpt-4.1-mini"],
+        maxOutputTokens: 160,
+        stopSequences: ["\n"],
+        temperature: 0.7,
+      },
     });
   });
 
@@ -112,6 +118,12 @@ Stay clipped and in character.`,
     expect(request.messages.at(-1)).toEqual({
       content: "say something",
       role: "user",
+    });
+    expect(request.settings).toEqual({
+      fallbackModels: ["openai/gpt-4.1-mini"],
+      maxOutputTokens: 160,
+      stopSequences: ["\n"],
+      temperature: 0.7,
     });
   });
 });

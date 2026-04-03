@@ -50,8 +50,10 @@ interface StoredSessionMessageRow {
   readonly bot_id: string | null;
   readonly content: string;
   readonly is_bot: number;
+  readonly model_used: string | null;
   readonly platform: string;
   readonly session_id: string;
+  readonly tokens_used: number | null;
   readonly username: string;
 }
 
@@ -188,7 +190,15 @@ const loadStoredSessionMessages = (
     Effect.gen(function* queryStoredSessionMessages() {
       const sql = yield* SqlClient.SqlClient;
 
-      return yield* sql<StoredSessionMessageRow>`SELECT session_id, bot_id, username, content, platform, is_bot
+      return yield* sql<StoredSessionMessageRow>`SELECT
+          session_id,
+          bot_id,
+          username,
+          content,
+          platform,
+          is_bot,
+          model_used,
+          tokens_used
         FROM session_messages
         ORDER BY sent_at ASC, rowid ASC`;
     }),
@@ -450,16 +460,20 @@ describe("session service", () => {
           bot_id: null,
           content: "hello from chat",
           is_bot: 0,
+          model_used: null,
           platform: "mock",
           session_id: session.sessionId,
+          tokens_used: null,
           username: "viewer-1",
         },
         {
           bot_id: mockBot.botId,
           content: "bot reply",
           is_bot: 1,
+          model_used: null,
           platform: "mock",
           session_id: session.sessionId,
+          tokens_used: null,
           username: mockBot.username,
         },
       ]);
@@ -585,6 +599,83 @@ describe("session service", () => {
           }),
         ]);
       }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
+  it.effect("records live generation model, tokens, and cost on the session", () =>
+    Effect.gen(function* recordsLiveGenerationModelTokensAndCostOnTheSession() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, makeStoredBot());
+      const aiLayer = Layer.succeed(
+        AiClient,
+        AiClient.of({
+          generateText: Effect.fn("AiClient.generateText")((request) =>
+            Effect.succeed({
+              costUsd: 0.125,
+              model: request.model,
+              text: "Pixel: routed through production client",
+              tokensUsed: 27,
+            }),
+          ),
+        }),
+      );
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+      const session = yield* Effect.gen(function* exerciseGenerationAccounting() {
+        const sessionService = yield* SessionService;
+
+        const activeSession = yield* sessionService.startSession();
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hey @pixel route this",
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        });
+        expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+
+        yield* TestClock.adjust("3 seconds");
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+
+        return activeSession;
+      }).pipe(Effect.provide(appLayer));
+
+      expect(yield* loadStoredSessionMessages(dbPath)).toEqual([
+        {
+          bot_id: null,
+          content: "hey @pixel route this",
+          is_bot: 0,
+          model_used: null,
+          platform: "mock",
+          session_id: session.id,
+          tokens_used: null,
+          username: "viewer-1",
+        },
+        {
+          bot_id: mockBot.botId,
+          content: "Pixel: routed through production client",
+          is_bot: 1,
+          model_used: "openrouter/mock-model",
+          platform: "mock",
+          session_id: session.id,
+          tokens_used: 27,
+          username: "pixel",
+        },
+      ]);
+      expect(yield* loadStoredSessionLimits(dbPath)).toEqual([
+        {
+          cost_limit_usd: null,
+          end_reason: null,
+          status: "active",
+          time_limit_seconds: null,
+          total_cost_usd: 0.125,
+          total_tokens_used: 27,
+        },
+      ]);
     }),
   );
 
@@ -837,25 +928,30 @@ describe("session service", () => {
         return startedSession;
       }).pipe(Effect.provide(appLayer));
 
-      expect(yield* loadStoredSessionMessages(dbPath)).toEqual([
-        {
-          bot_id: mockBot.botId,
-          content: "check out the merch",
-          is_bot: 1,
-          platform: "mock",
-          session_id: session.id,
-          username: "pixel",
-        },
-        {
-          bot_id: mockBot.botId,
-          content:
-            "Pixel: [fake:openrouter/mock-model] Scenario topic: new merch drop Step hint: react to the merch drop naturally",
-          is_bot: 1,
-          platform: "mock",
-          session_id: session.id,
-          username: "pixel",
-        },
-      ]);
+      const storedMessages = yield* loadStoredSessionMessages(dbPath);
+
+      expect(storedMessages).toHaveLength(2);
+      expect(storedMessages[0]).toEqual({
+        bot_id: mockBot.botId,
+        content: "check out the merch",
+        is_bot: 1,
+        model_used: null,
+        platform: "mock",
+        session_id: session.id,
+        tokens_used: null,
+        username: "pixel",
+      });
+      expect(storedMessages[1]).toMatchObject({
+        bot_id: mockBot.botId,
+        content:
+          "Pixel: [fake:openrouter/mock-model] Scenario topic: new merch drop Step hint: react to the merch drop naturally",
+        is_bot: 1,
+        model_used: "openrouter/mock-model",
+        platform: "mock",
+        session_id: session.id,
+        username: "pixel",
+      });
+      expect(storedMessages[1]?.tokens_used).toEqual(expect.any(Number));
     }),
   );
 

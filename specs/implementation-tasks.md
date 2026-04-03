@@ -136,14 +136,14 @@ Use it with:
 
 ## Track 4: Real AI and Director Slices
 
-### [ ] VS-14: Replace fake AI preview with real OpenRouter integration
+### [x] VS-14: Replace fake AI preview with real OpenRouter integration
 
 - Depends on: `VS-04`
 - Outcome: Bot preview can call OpenRouter through the production AI client with model and fallback configuration.
 - Spec inputs: `specs/technical-ai.md`, `specs/bots.md`, `specs/architecture.md`
 - Verify: request construction tests, fallback/error integration test, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-15: Use real AI for live bot generation
+### [x] VS-15: Use real AI for live bot generation
 
 - Depends on: `VS-08`, `VS-12`, `VS-14`
 - Outcome: Live orchestration uses the production prompt assembly, token accounting, and fallback chain.
