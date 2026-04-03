@@ -2,18 +2,13 @@
 
 ## Project Overview
 
-**Lonely Chat** -- AI-powered Twitch chat bots. Multiple bots with distinct personalities join chat, respond to @mentions and randomly participate, with a moderator bot that can timeout users. Built on Effect v4.
+**Lonely Chat** -- AI-powered Twitch chat bots. Multiple bots with distinct personalities join chat, respond to @mentions and randomly participate, with a moderator bot that can timeout users.
 
-## Stack
+## Foundation
 
-- **Effect**: v4 (4.0.0-beta.43) -- ServiceMap.Service, Layer, PubSub, Queue, Ref, Schema, SQL
-- **Toolchain**: Vite+ (oxlint + oxfmt), all categories enabled, type-aware
-- **Package manager**: pnpm
-- **Twitch**: Twurple (auth, chat, api, eventsub-ws)
-- **AI**: Vercel AI SDK v5 + OpenRouter provider
-- **HTTP**: Hono (auth dashboard/API) bridged via ManagedRuntime
-- **DB**: SQLite via @effect/sql-sqlite-bun
-- **Config**: TOML with hot-reload (SIGHUP)
+- **Effect v4** (4.0.0-beta.43)
+- **Vite+** toolchain (oxlint + oxfmt), all lint categories enabled, type-aware
+- **pnpm** package manager
 
 ## Commands
 
@@ -24,25 +19,6 @@ vp fmt          # format only
 vp dev          # dev server
 vp pack         # production build
 vp test         # run tests
-```
-
-## Project Structure
-
-```
-src/                           # all source code
-  index.ts                     # BunRuntime.runMain(Layer.launch(MainLive))
-  AppConfig.ts                 # Effect Config layer (env vars)
-  Errors.ts                    # Schema.TaggedErrorClass errors
-  Pubsub.ts                   # PubSub tags: StreamEventPubSub, ChatMessagePubSub
-  MainLive.ts                  # top-level layer composition
-  config/                      # bot config schema + TOML loader
-  db/                          # SQLite layer + token repo
-  auth/                        # TokenManager + OAuth service
-  twitch/                      # stream monitor, chat listener, bot clients
-  bot/                         # bot manager, response coordinator, queue, message window
-  ai/                          # AI service (generateText/generateObject)
-  http/                        # Hono server + routes + JSX components
-.references/                   # Effect v4 reference repos (not committed)
 ```
 
 ## Effect v4 Patterns
@@ -113,10 +89,4 @@ Local clones in `.references/` for searching real implementations:
 
 ## Architecture
 
-See `PLAN.md` for full layer dependency graph, PubSub topology, and phased implementation plan.
-
-## Environment Variables
-
-Required: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_CHANNEL_ID`, `TWITCH_CHANNEL_NAME`, `OPENROUTER_KEY`
-
-Optional: `TOKEN_DB_PATH` (default `./tokens.db`), `BOT_CONFIG_PATH` (default `./config/bots.toml`), `PORT` (default `8080`), `NODE_ENV`, `LOG_LEVEL`
+See `PLAN.md` for the rearchitecture plan.
