@@ -1,5 +1,3 @@
-# CLAUDE.md
-
 ## Project Overview
 
 **Lonely Chat** -- AI-powered Twitch chat bots. Multiple bots with distinct personalities join chat, respond to @mentions and randomly participate, with a moderator bot that can timeout users.
@@ -86,7 +84,3 @@ Local clones in `.references/` for searching real implementations:
 - `.references/effect-smol/migration/` -- v3 to v4 migration guides
 - `.references/opencode/packages/opencode/src/` -- large Effect v4 app (ServiceMap.Service, ManagedRuntime+Hono, PubSub, Effect.fn)
 - `.references/t3code/apps/server/src/` -- Effect v4 server (Layer.provideMerge, Queue+PubSub, HttpRouter)
-
-## Architecture
-
-See `PLAN.md` for the rearchitecture plan.
