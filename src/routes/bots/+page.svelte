@@ -5,11 +5,13 @@
 		updateBot,
 		saveBotToken,
 		previewBot,
+		sendKickTestMessage,
 		sendTwitchTestMessage
 	} from '$lib/remote/bots.remote';
 	import type {
 		BotAuthStatusRecord,
 		BotEditorFormErrors,
+		KickTestMessageFormInput,
 		BotRecord,
 		BotTokenFormInput,
 		BotTokenRecord,
@@ -73,6 +75,14 @@
 		};
 	}
 
+	interface SendKickTestMessageResult {
+		ok: boolean;
+		errors: {
+			general?: string;
+			text?: string;
+		};
+	}
+
 	const emptyFormState = (): BotFormState => ({
 		name: '',
 		displayName: '',
@@ -127,6 +137,10 @@
 		text: 'lonely chat tracer bullet online',
 	});
 
+	const emptyKickTestMessageForm = (): KickTestMessageFormInput => ({
+		text: 'lonely chat kick tracer bullet online',
+	});
+
 	let expandedBotId: string | null = $state(null);
 	let showCreateForm = $state(false);
 
@@ -179,6 +193,16 @@
 	> = $state({});
 	const twitchTestMessageSaving: Record<string, boolean> = $state({});
 	const twitchTestMessageSuccess: Record<string, boolean> = $state({});
+	const kickTestMessageForms: Record<string, KickTestMessageFormInput> = $state({});
+	const kickTestMessageErrors: Record<
+		string,
+		{
+			general?: string;
+			text?: string;
+		}
+	> = $state({});
+	const kickTestMessageSaving: Record<string, boolean> = $state({});
+	const kickTestMessageSuccess: Record<string, boolean> = $state({});
 
 	const initEditForm = (bot: BotRecord) => {
 		if (editForms[bot.id]) {
@@ -201,6 +225,14 @@
 		}
 
 		twitchTestMessageForms[botId] = emptyTwitchTestMessageForm();
+	};
+
+	const initKickTestMessageForm = (botId: string) => {
+		if (kickTestMessageForms[botId]) {
+			return;
+		}
+
+		kickTestMessageForms[botId] = emptyKickTestMessageForm();
 	};
 
 	const handleUpdate = async (botId: string) => {
@@ -259,6 +291,28 @@
 			}
 		} finally {
 			twitchTestMessageSaving[botId] = false;
+		}
+	};
+
+	const handleKickTestMessage = async (botId: string) => {
+		const form = kickTestMessageForms[botId];
+		if (!form) {
+			return;
+		}
+
+		kickTestMessageSaving[botId] = true;
+		kickTestMessageSuccess[botId] = false;
+		try {
+			const result = (await sendKickTestMessage({
+				botId,
+				values: form,
+			})) as SendKickTestMessageResult;
+			kickTestMessageErrors[botId] = result.errors;
+			if (result.ok) {
+				kickTestMessageSuccess[botId] = true;
+			}
+		} finally {
+			kickTestMessageSaving[botId] = false;
 		}
 	};
 
@@ -404,6 +458,56 @@
 				onclick={() => handleTwitchTestMessage(botId)}
 				disabled={saving}
 				class="rounded-md bg-violet-200 px-4 py-1.5 text-sm font-medium text-zinc-950 transition-colors hover:bg-violet-100 disabled:opacity-50"
+			>
+				{saving ? 'Sending...' : 'Send Test Message'}
+			</button>
+			{#if success}
+				<span class="text-sm text-green-400">Test message sent.</span>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
+{#snippet kickTracerSection(
+	botId: string,
+	form: KickTestMessageFormInput,
+	errors: {
+		general?: string;
+		text?: string;
+	},
+	saving: boolean,
+	success: boolean,
+)}
+	<div class="mt-4 rounded-md border border-zinc-800 bg-zinc-950 p-4">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h4 class="text-xs font-medium text-zinc-400">Kick Tracer Bullet</h4>
+				<p class="mt-1 text-xs text-zinc-500">
+					Authorize this bot with Kick OAuth 2.1, then post one live test message through the
+					production Kick chat endpoint.
+				</p>
+			</div>
+			<a
+				href={`/auth/kick/start?botId=${botId}`}
+				class="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900"
+			>
+				Authorize on Kick
+			</a>
+		</div>
+
+		<div class="mt-4">
+			{@render textInput('Test Message', form.text, (v) => (form.text = v), errors.text)}
+		</div>
+
+		{#if errors.general}
+			<p class="mt-3 text-sm text-red-400">{errors.general}</p>
+		{/if}
+
+		<div class="mt-4 flex items-center gap-3">
+			<button
+				onclick={() => handleKickTestMessage(botId)}
+				disabled={saving}
+				class="rounded-md bg-green-300 px-4 py-1.5 text-sm font-medium text-zinc-950 transition-colors hover:bg-green-200 disabled:opacity-50"
 			>
 				{saving ? 'Sending...' : 'Send Test Message'}
 			</button>
@@ -657,6 +761,7 @@
 			{(initEditForm(bot), '')}
 			{(initTokenForm(bot.id, item.token), '')}
 			{(initTwitchTestMessageForm(bot.id), '')}
+			{(initKickTestMessageForm(bot.id), '')}
 
 			<div id={`bot-${bot.id}`} class="mb-3 rounded-lg border border-zinc-800 bg-zinc-900">
 				<button
@@ -726,6 +831,14 @@
 								twitchTestMessageErrors[bot.id] ?? {},
 								twitchTestMessageSaving[bot.id] ?? false,
 								twitchTestMessageSuccess[bot.id] ?? false,
+							)}
+						{:else if bot.platform === 'kick'}
+							{@render kickTracerSection(
+								bot.id,
+								kickTestMessageForms[bot.id]!,
+								kickTestMessageErrors[bot.id] ?? {},
+								kickTestMessageSaving[bot.id] ?? false,
+								kickTestMessageSuccess[bot.id] ?? false,
 							)}
 						{/if}
 						{@render previewSection(bot.id)}

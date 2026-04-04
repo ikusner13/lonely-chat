@@ -187,7 +187,7 @@ Use it with:
 - Spec inputs: `specs/platforms.md`, `specs/ui.md`, `specs/technical-effect.md`, `specs/technical-orchestrator.md`
 - Verify: adapter-to-session integration tests, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-21: Kick auth and send-message tracer bullet
+### [x] VS-21: Kick auth and send-message tracer bullet
 
 - Depends on: `VS-18`
 - Outcome: One Kick bot can authorize and send a test message through the production adapter.

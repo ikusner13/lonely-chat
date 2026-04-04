@@ -16,6 +16,11 @@ import {
 } from "../../bots/bot-editor-fields";
 import type { BotEditorFormErrors } from "../../bots/bot-editor-fields";
 import { BotService } from "../../bots/Services/bot-service";
+import { KickPlatformAdapterLive } from "../../platforms/Layers/kick-platform-adapter";
+import {
+  KickPlatformAdapter,
+  KickTestMessageRequest,
+} from "../../platforms/Services/kick-platform-adapter";
 import {
   TwitchPlatformAdapter,
   TwitchTestMessageRequest,
@@ -86,6 +91,18 @@ interface SendTwitchTestMessageResult {
 
 interface TwitchTestMessageFormInput {
   readonly channel: string;
+  readonly text: string;
+}
+
+interface SendKickTestMessageResult {
+  readonly errors: {
+    general?: string;
+    text?: string;
+  };
+  readonly ok: boolean;
+}
+
+interface KickTestMessageFormInput {
   readonly text: string;
 }
 
@@ -233,7 +250,7 @@ export const saveBotToken = command(
 
 export { type BotRecord, type BotEditorFormErrors, type BotEditorFormInput };
 export { type BotAuthStatusRecord, type BotTokenFormInput, type BotTokenRecord };
-export { type TwitchTestMessageFormInput };
+export { type KickTestMessageFormInput, type TwitchTestMessageFormInput };
 
 export const previewBot = command(
   "unchecked",
@@ -321,6 +338,56 @@ export const sendTwitchTestMessage = command(
             ),
           ),
       ).pipe(Effect.provide(TwitchPlatformAdapterLive)),
+    );
+
+    await getBotManagerData().refresh();
+
+    return result;
+  },
+);
+
+export const sendKickTestMessage = command(
+  "unchecked",
+  async ({
+    botId,
+    values,
+  }: {
+    readonly botId: string;
+    readonly values: KickTestMessageFormInput;
+  }): Promise<SendKickTestMessageResult> => {
+    const text = trim(values.text);
+    const errors: SendKickTestMessageResult["errors"] = {};
+
+    if (text.length === 0) {
+      errors.text = "Message text is required.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return { errors, ok: false };
+    }
+
+    const result = await effectRunner(
+      KickPlatformAdapter.use((kickPlatformAdapter) =>
+        kickPlatformAdapter
+          .sendTestMessage(
+            new KickTestMessageRequest({
+              botId: BotId.makeUnsafe(botId),
+              text,
+            }),
+          )
+          .pipe(
+            Effect.as<SendKickTestMessageResult>({
+              errors: {},
+              ok: true,
+            }),
+            Effect.catchTag("KickPlatformError", (error) =>
+              Effect.succeed({
+                errors: { general: error.reason },
+                ok: false,
+              } satisfies SendKickTestMessageResult),
+            ),
+          ),
+      ).pipe(Effect.provide(KickPlatformAdapterLive)),
     );
 
     await getBotManagerData().refresh();
