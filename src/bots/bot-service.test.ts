@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { makeDatabaseLayer } from "../db/database";
+import { SessionId } from "../sessions/Services/session-service";
+import { BotMemoryId, BotMemoryRecord } from "./bot-memory-record";
 import { BotId, BotRecord } from "./bot-record";
 import { BotServiceLive } from "./Layers/bot-service";
 import { BotService } from "./Services/bot-service";
@@ -34,6 +36,13 @@ interface StoredBotRow {
   readonly temperature: number;
   readonly updated_at: string;
   readonly vocabulary_rules: string;
+}
+
+interface StoredBotMemoryRow {
+  readonly bot_id: string;
+  readonly created_at: string;
+  readonly session_id: string;
+  readonly summary: string;
 }
 
 const createDatabasePath = Effect.acquireRelease(
@@ -85,6 +94,65 @@ const loadStoredBots = (dbPath: string): Effect.Effect<readonly StoredBotRow[], 
           updated_at
         FROM bots
         ORDER BY created_at ASC`;
+    }),
+  );
+
+const loadStoredBotMemories = (
+  dbPath: string,
+): Effect.Effect<readonly StoredBotMemoryRow[], unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* queryStoredBotMemories() {
+      const sql = yield* SqlClient.SqlClient;
+
+      return yield* sql<StoredBotMemoryRow>`SELECT
+          bot_id,
+          session_id,
+          summary,
+          created_at
+        FROM bot_memory
+        ORDER BY created_at DESC, rowid DESC`;
+    }),
+  );
+
+const insertStoredSession = (
+  dbPath: string,
+  sessionId: string,
+  startedAt: string,
+): Effect.Effect<void, unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* insertStoredSessionRow() {
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`INSERT INTO sessions (
+          id,
+          platform,
+          channel,
+          status,
+          started_at,
+          ended_at,
+          end_reason,
+          total_messages,
+          total_tokens_used,
+          total_cost_usd,
+          time_limit_seconds,
+          cost_limit_usd
+        )
+        VALUES (
+          ${sessionId},
+          ${"mock"},
+          ${"lonely-chat"},
+          ${"ended"},
+          ${startedAt},
+          ${startedAt},
+          ${"manual"},
+          ${0},
+          ${0},
+          ${0},
+          ${null},
+          ${null}
+        )`;
     }),
   );
 
@@ -230,6 +298,56 @@ describe("bot service", () => {
           temperature: 1.1,
           updated_at: "2026-04-03T00:00:02.000Z",
           vocabulary_rules: JSON.stringify(["Never hedge.", "Never use emojis."]),
+        },
+      ]);
+    }),
+  );
+
+  it.effect("stores and lists recent bot memory summaries in reverse chronological order", () =>
+    Effect.gen(function* storesAndListsRecentBotMemorySummariesInReverseChronologicalOrder() {
+      const dbPath = yield* createDatabasePath;
+      const botLayer = BotServiceLive.pipe(Layer.provide(makeDatabaseLayer(dbPath)));
+      const bot = makeTestBot();
+      const olderMemory = new BotMemoryRecord({
+        botId: bot.id,
+        createdAt: "2026-04-03T00:10:00.000Z",
+        id: BotMemoryId.makeUnsafe("memory-older"),
+        sessionId: SessionId.makeUnsafe("session-older"),
+        summary: "Kept calling everything a halftime adjustment.",
+      });
+      const newerMemory = new BotMemoryRecord({
+        botId: bot.id,
+        createdAt: "2026-04-03T00:20:00.000Z",
+        id: BotMemoryId.makeUnsafe("memory-newer"),
+        sessionId: SessionId.makeUnsafe("session-newer"),
+        summary: "Started a running joke about referee reviews.",
+      });
+
+      const storedMemories = yield* Effect.gen(function* exerciseBotMemoryPersistence() {
+        const botService = yield* BotService;
+
+        yield* botService.createBot(bot);
+        yield* insertStoredSession(dbPath, olderMemory.sessionId, olderMemory.createdAt);
+        yield* insertStoredSession(dbPath, newerMemory.sessionId, newerMemory.createdAt);
+        yield* botService.createBotMemory(olderMemory);
+        yield* botService.createBotMemory(newerMemory);
+
+        return yield* botService.listBotMemories(bot.id);
+      }).pipe(Effect.provide(botLayer));
+
+      expect(storedMemories).toEqual([newerMemory, olderMemory]);
+      expect(yield* loadStoredBotMemories(dbPath)).toEqual([
+        {
+          bot_id: bot.id,
+          created_at: newerMemory.createdAt,
+          session_id: newerMemory.sessionId,
+          summary: newerMemory.summary,
+        },
+        {
+          bot_id: bot.id,
+          created_at: olderMemory.createdAt,
+          session_id: olderMemory.sessionId,
+          summary: olderMemory.summary,
         },
       ]);
     }),

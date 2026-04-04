@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import { buildBotPromptMessages, buildGenerationSettings } from "../ai/prompt-assembly";
 import { AiModelName, BotName } from "../ai/Services/ai-client";
 import type { AiGenerateRequest } from "../ai/Services/ai-client";
+import type { BotMemoryRecord } from "../bots/bot-memory-record";
 import { BotRecord } from "../bots/bot-record";
 import { BotId } from "../platforms/Services/platform-adapter";
 import type { PlatformName } from "../platforms/Services/platform-adapter";
@@ -393,10 +394,12 @@ export const makeMentionResponseRequest = (
   bot: BotRecord,
   platform: PlatformName,
   recentMessages: readonly SessionMessageRecord[],
+  botMemories: readonly BotMemoryRecord[] = [],
   directorHint: string | null = null,
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
   messages: buildBotPromptMessages(bot, platform, {
+    botMemories,
     finalSystemPrompt: directorHint,
     recentMessages,
   }),
@@ -408,10 +411,12 @@ export const makeSilenceBreakerRequest = (
   bot: BotRecord,
   platform: PlatformName,
   recentMessages: readonly SessionMessageRecord[],
+  botMemories: readonly BotMemoryRecord[] = [],
   directorHint: string | null = null,
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
   messages: buildBotPromptMessages(bot, platform, {
+    botMemories,
     finalSystemPrompt: directorHint,
     finalUserPrompt: "Start a new conversation topic naturally.",
     recentMessages,
@@ -426,9 +431,11 @@ export const makeScenarioResponseRequest = (
   recentMessages: readonly SessionMessageRecord[],
   topic: string,
   hint: string | null,
+  botMemories: readonly BotMemoryRecord[] = [],
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
   messages: buildBotPromptMessages(bot, platform, {
+    botMemories,
     finalUserPrompt: [`Scenario topic: ${topic}`, hint === null ? null : `Step hint: ${hint}`]
       .filter((line): line is string => line !== null)
       .join("\n"),

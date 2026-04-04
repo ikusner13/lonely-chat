@@ -3,7 +3,9 @@ import * as Layer from "effect/Layer";
 import { Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { BotMemoryId, BotMemoryRecord } from "../bot-memory-record";
 import { BotId, BotRecord } from "../bot-record";
+import { SessionId } from "../../sessions/Services/session-service";
 import { BotService } from "../Services/bot-service";
 import type { BotServiceShape } from "../Services/bot-service";
 
@@ -31,6 +33,14 @@ interface BotRow {
   readonly temperature: number;
   readonly updated_at: string;
   readonly vocabulary_rules: string;
+}
+
+interface BotMemoryRow {
+  readonly bot_id: string;
+  readonly created_at: string;
+  readonly id: string;
+  readonly session_id: string;
+  readonly summary: string;
 }
 
 const parseStringArray = (value: string): readonly string[] =>
@@ -61,6 +71,15 @@ const makeBotRecord = (row: BotRow): BotRecord =>
     temperature: row.temperature,
     updatedAt: row.updated_at,
     vocabularyRules: parseStringArray(row.vocabulary_rules),
+  });
+
+const makeBotMemoryRecord = (row: BotMemoryRow): BotMemoryRecord =>
+  new BotMemoryRecord({
+    botId: BotId.makeUnsafe(row.bot_id),
+    createdAt: row.created_at,
+    id: BotMemoryId.makeUnsafe(row.id),
+    sessionId: SessionId.makeUnsafe(row.session_id),
+    summary: row.summary,
   });
 
 const selectFirstBot = (rows: readonly BotRow[]): BotRecord | null => {
@@ -129,6 +148,27 @@ export const BotServiceLive = Layer.effect(
       return bot;
     });
 
+    const createBotMemory = Effect.fn("BotService.createBotMemory")(function* createBotMemoryEffect(
+      memory: BotMemoryRecord,
+    ) {
+      yield* sql`INSERT INTO bot_memory (
+          id,
+          bot_id,
+          session_id,
+          summary,
+          created_at
+        )
+        VALUES (
+          ${memory.id},
+          ${memory.botId},
+          ${memory.sessionId},
+          ${memory.summary},
+          ${memory.createdAt}
+        )`;
+
+      return memory;
+    });
+
     const getBot = Effect.fn("BotService.getBot")(function* getBotEffect(id: BotId) {
       const rows = yield* sql<BotRow>`SELECT
           id,
@@ -157,6 +197,22 @@ export const BotServiceLive = Layer.effect(
         LIMIT 1`;
 
       return selectFirstBot(rows);
+    });
+
+    const listBotMemories = Effect.fn("BotService.listBotMemories")(function* listBotMemoriesEffect(
+      botId: BotId,
+    ) {
+      const rows = yield* sql<BotMemoryRow>`SELECT
+          id,
+          bot_id,
+          session_id,
+          summary,
+          created_at
+        FROM bot_memory
+        WHERE bot_id = ${botId}
+        ORDER BY created_at DESC, rowid DESC`;
+
+      return rows.map(makeBotMemoryRecord);
     });
 
     const listBots = Effect.fn("BotService.listBots")(function* listBotsEffect() {
@@ -216,7 +272,9 @@ export const BotServiceLive = Layer.effect(
 
     return BotService.of({
       createBot,
+      createBotMemory,
       getBot,
+      listBotMemories,
       listBots,
       updateBot,
     } satisfies BotServiceShape);

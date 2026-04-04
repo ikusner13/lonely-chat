@@ -342,6 +342,7 @@ describe("speaker selection", () => {
           username: ChatUsername.makeUnsafe("echo"),
         }),
       ],
+      [],
       "[CONTEXT: Current vibe: stale. Consider steering the conversation toward: co-op games.]",
     );
 

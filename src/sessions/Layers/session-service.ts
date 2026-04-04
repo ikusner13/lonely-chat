@@ -12,8 +12,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import type { AiGenerationError } from "../../ai/ai-generation-error";
+import { getBotMemorySourceMessages, makeBotMemoryRequest } from "../../ai/bot-memory";
 import { AiClient } from "../../ai/Services/ai-client";
 import type { AiGenerateResponse } from "../../ai/Services/ai-client";
+import { BotMemoryId, BotMemoryRecord } from "../../bots/bot-memory-record";
 import type { BotRecord } from "../../bots/bot-record";
 import { BotService } from "../../bots/Services/bot-service";
 import {
@@ -122,6 +124,11 @@ interface PendingGeneratedMessage {
   readonly text: string;
   readonly tokensUsed: number;
   readonly username: ChatUsername;
+}
+
+interface BotMemorySummaryCandidate {
+  readonly bot: BotRecord;
+  readonly sourceMessages: readonly SessionMessageRecord[];
 }
 
 const sessionExportCsvHeader = [
@@ -265,6 +272,23 @@ const renderSessionMessagesCsv = (messages: readonly SessionMessageRecord[]): st
       ].join(","),
     ),
   ].join("\n");
+
+const collectBotMemoryCandidates = (
+  bots: readonly BotRecord[],
+  sessionMessages: readonly SessionMessageRecord[],
+): readonly BotMemorySummaryCandidate[] =>
+  bots.flatMap((bot) => {
+    const sourceMessages = getBotMemorySourceMessages(bot, sessionMessages);
+
+    return sourceMessages.length === 0
+      ? []
+      : [
+          {
+            bot,
+            sourceMessages,
+          } satisfies BotMemorySummaryCandidate,
+        ];
+  });
 
 export const SessionServiceLive = Layer.effect(
   SessionService,
@@ -471,6 +495,42 @@ export const SessionServiceLive = Layer.effect(
             WHERE id = ${sessionId}
             LIMIT 1`,
           );
+        },
+      );
+
+      const getBotMemories = Effect.fn("SessionService.getBotMemories")(
+        function* getBotMemoriesEffect(botId: BotRecord["id"]) {
+          return yield* botService.listBotMemories(botId);
+        },
+      );
+
+      const generateBotMemories = Effect.fn("SessionService.generateBotMemories")(
+        function* generateBotMemoriesEffect(session: SessionRecord) {
+          const bots = yield* botService.listBots();
+          const sessionMessages = yield* getSessionMessages(session.id);
+          const memoryCandidates = collectBotMemoryCandidates(bots, sessionMessages);
+
+          for (const candidate of memoryCandidates) {
+            const summaryResponse = yield* aiClient
+              .generateText(
+                makeBotMemoryRequest(candidate.bot, session.platform, candidate.sourceMessages),
+              )
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+
+            if (summaryResponse === null || summaryResponse.text.trim().length === 0) {
+              continue;
+            }
+
+            yield* botService.createBotMemory(
+              new BotMemoryRecord({
+                botId: candidate.bot.id,
+                createdAt: yield* getCurrentTimestamp(),
+                id: BotMemoryId.makeUnsafe(crypto.randomUUID()),
+                sessionId: session.id,
+                summary: summaryResponse.text.trim(),
+              }),
+            );
+          }
         },
       );
 
@@ -710,6 +770,7 @@ export const SessionServiceLive = Layer.effect(
         yield* stopSilenceBreaker();
         yield* stopSessionTimer();
         yield* interruptTrackedFibers();
+        yield* generateBotMemories(endedSession).pipe(Effect.catch(() => Effect.void));
         yield* Ref.set(activeSessionRef, null);
         yield* Ref.set(activeAlertsRef, []);
         yield* Ref.set(lastActivityAtRef, null);
@@ -891,6 +952,7 @@ export const SessionServiceLive = Layer.effect(
                   platform: session.platform,
                   username: ChatUsername.makeUnsafe(bot.name),
                 } as const;
+                const botMemories = yield* getBotMemories(bot.id);
                 yield* platformAdapter.connect(speakerConnection);
                 const response = yield* aiClient.generateText(
                   makeScenarioResponseRequest(
@@ -899,6 +961,7 @@ export const SessionServiceLive = Layer.effect(
                     yield* getSessionMessages(session.id),
                     scenario.topic,
                     step.content,
+                    botMemories,
                   ),
                 );
 
@@ -1011,12 +1074,18 @@ export const SessionServiceLive = Layer.effect(
               selectedSpeaker.bot,
               responseTriggerForSelectionReason(selectedSpeaker.reason),
               (directorHint) =>
-                Effect.map(getSessionMessages(session.id), (recentMessages) =>
-                  makeMentionResponseRequest(
-                    selectedSpeaker.bot,
-                    session.platform,
-                    recentMessages,
-                    directorHint,
+                Effect.all([
+                  getSessionMessages(session.id),
+                  getBotMemories(selectedSpeaker.bot.id),
+                ]).pipe(
+                  Effect.map(([recentMessages, botMemories]) =>
+                    makeMentionResponseRequest(
+                      selectedSpeaker.bot,
+                      session.platform,
+                      recentMessages,
+                      botMemories,
+                      directorHint,
+                    ),
                   ),
                 ),
               selectionIndex,
@@ -1066,12 +1135,18 @@ export const SessionServiceLive = Layer.effect(
               }
 
               yield* scheduleResponse(session, silenceBreakerBot, "silence", (directorHint) =>
-                Effect.map(getSessionMessages(session.id), (recentMessages) =>
-                  makeSilenceBreakerRequest(
-                    silenceBreakerBot,
-                    session.platform,
-                    recentMessages,
-                    directorHint,
+                Effect.all([
+                  getSessionMessages(session.id),
+                  getBotMemories(silenceBreakerBot.id),
+                ]).pipe(
+                  Effect.map(([recentMessages, botMemories]) =>
+                    makeSilenceBreakerRequest(
+                      silenceBreakerBot,
+                      session.platform,
+                      recentMessages,
+                      botMemories,
+                      directorHint,
+                    ),
                   ),
                 ),
               );

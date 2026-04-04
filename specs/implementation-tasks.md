@@ -157,7 +157,7 @@ Use it with:
 - Spec inputs: `specs/technical-orchestrator.md`, `specs/technical-ai.md`, `specs/orchestration.md`
 - Verify: director trigger tests, hint/nudge tests, `vp check`, targeted `vp test`
 
-### [ ] VS-17: Generate and inject bot memory across sessions
+### [x] VS-17: Generate and inject bot memory across sessions
 
 - Depends on: `VS-15`
 - Outcome: Session-end summaries are generated per bot, stored, and injected into the next session's prompt assembly.

@@ -67,6 +67,13 @@ interface StoredSessionLimitRow {
   readonly total_tokens_used: number;
 }
 
+interface StoredBotMemoryRow {
+  readonly bot_id: string;
+  readonly created_at: string;
+  readonly session_id: string;
+  readonly summary: string;
+}
+
 const escapeCsvValue = (value: string): string => `"${value.replaceAll('"', '""')}"`;
 
 const mockBot: BotConnection = {
@@ -225,6 +232,24 @@ const loadStoredSessionLimits = (
     }),
   );
 
+const loadStoredBotMemories = (
+  dbPath: string,
+): Effect.Effect<readonly StoredBotMemoryRow[], unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* queryStoredBotMemories() {
+      const sql = yield* SqlClient.SqlClient;
+
+      return yield* sql<StoredBotMemoryRow>`SELECT
+          bot_id,
+          session_id,
+          summary,
+          created_at
+        FROM bot_memory
+        ORDER BY created_at ASC, rowid ASC`;
+    }),
+  );
+
 const insertStoredBot = (dbPath: string, bot: BotRecord): Effect.Effect<void, unknown> =>
   runWithDatabase(
     dbPath,
@@ -343,6 +368,48 @@ const makeDirectorAwareAiClient = (directorResponseText: string) => {
               model: request.model,
               text: `${request.botName}: directed reply`,
               tokensUsed: 18,
+            };
+          }),
+        ),
+      }),
+    ),
+    getRequests: Effect.sync(() => [...requests]),
+  };
+};
+
+const makeMemoryAwareAiClient = () => {
+  const requests: AiGenerateRequest[] = [];
+
+  return {
+    aiLayer: Layer.succeed(
+      AiClient,
+      AiClient.of({
+        generateText: Effect.fn("AiClient.generateText")((request) =>
+          Effect.sync(() => {
+            requests.push(request);
+
+            const summaryPrompt = request.messages.find(
+              (message) =>
+                message.role === "system" &&
+                message.content.includes(
+                  "Summarize this bot's conversational style during this session.",
+                ),
+            );
+
+            if (summaryPrompt !== undefined) {
+              return {
+                costUsd: 0,
+                model: request.model,
+                text: `${request.botName} keeps a running joke about split times.`,
+                tokensUsed: 11,
+              };
+            }
+
+            return {
+              costUsd: 0,
+              model: request.model,
+              text: `${request.botName}: live reply`,
+              tokensUsed: 19,
             };
           }),
         ),
@@ -741,6 +808,93 @@ describe("session service", () => {
         },
       ]);
     }),
+  );
+
+  it.effect(
+    "stores bot memory summaries at session end and injects them into the next session",
+    () =>
+      Effect.gen(function* storesBotMemorySummariesAtSessionEndAndInjectsThemIntoTheNextSession() {
+        const dbPath = yield* createDatabasePath;
+        yield* insertStoredBot(
+          dbPath,
+          makeStoredBot({
+            talkativeness: 0,
+          }),
+        );
+        const memoryAwareAiClient = makeMemoryAwareAiClient();
+        const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+        const platformLayer = Layer.succeed(
+          PlatformAdapter,
+          PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+        );
+        const appLayer = makeSessionTestLayer(dbPath, platformLayer, memoryAwareAiClient.aiLayer);
+
+        yield* Effect.gen(function* exerciseBotMemoryFlow() {
+          const sessionService = yield* SessionService;
+
+          const firstSession = yield* sessionService.startSession();
+          yield* mockPlatformAdapter.emitIncomingMessage({
+            channel: mockBot.channel,
+            text: "hey @pixel remember that split?",
+            username: ChatUsername.makeUnsafe("viewer-1"),
+          });
+          expect(yield* waitForStoredSessionMessages(dbPath, 1)).toHaveLength(1);
+
+          yield* TestClock.adjust("3 seconds");
+          expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+
+          yield* sessionService.stopSession();
+
+          const storedMemories = yield* loadStoredBotMemories(dbPath);
+          expect(storedMemories).toHaveLength(1);
+          expect(storedMemories[0]).toMatchObject({
+            bot_id: "bot-1",
+            session_id: firstSession.id,
+            summary: "Pixel keeps a running joke about split times.",
+          });
+          expect(typeof storedMemories[0]?.created_at).toBe("string");
+
+          yield* sessionService.startSession();
+          yield* mockPlatformAdapter.emitIncomingMessage({
+            channel: mockBot.channel,
+            text: "hey @pixel run it back",
+            username: ChatUsername.makeUnsafe("viewer-2"),
+          });
+          expect(yield* waitForStoredSessionMessages(dbPath, 3)).toHaveLength(3);
+
+          yield* TestClock.adjust("3 seconds");
+          expect(yield* waitForStoredSessionMessages(dbPath, 4)).toHaveLength(4);
+
+          const requests = yield* memoryAwareAiClient.getRequests;
+          const liveRequests = requests.filter(
+            (request) =>
+              request.botName === "Pixel" &&
+              !request.messages.some(
+                (message) =>
+                  message.role === "system" &&
+                  message.content.includes(
+                    "Summarize this bot's conversational style during this session.",
+                  ),
+              ),
+          );
+          const secondSessionRequest = liveRequests.at(-1);
+
+          expect(secondSessionRequest).toBeDefined();
+          expect(secondSessionRequest?.messages).toEqual(
+            expect.arrayContaining([
+              {
+                content: [
+                  "THINGS YOU REMEMBER FROM PAST SESSIONS:",
+                  "- Pixel keeps a running joke about split times.",
+                ].join("\n"),
+                role: "system",
+              },
+            ]),
+          );
+
+          yield* sessionService.stopSession();
+        }).pipe(Effect.provide(appLayer));
+      }),
   );
 
   it.effect("runs the director on the message-count trigger and nudges the next response", () =>
