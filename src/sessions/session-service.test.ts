@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TestClock } from "effect/testing";
 
+import { AiGenerationError } from "../ai/ai-generation-error";
 import { FakeAiClientLive, makeFakeAiClient } from "../ai/Layers/fake-ai-client";
 import { AiClient } from "../ai/Services/ai-client";
 import type { AiGenerateRequest } from "../ai/Services/ai-client";
@@ -458,7 +459,7 @@ class FakeKickSessionChatClient {
 const waitForStoredSessionMessages = (
   dbPath: string,
   expectedCount: number,
-  remainingAttempts = 20,
+  remainingAttempts = 100,
 ): Effect.Effect<readonly StoredSessionMessageRow[], unknown> =>
   Effect.gen(function* waitForStoredSessionMessagesEffect() {
     const storedMessages = yield* loadStoredSessionMessages(dbPath);
@@ -470,6 +471,23 @@ const waitForStoredSessionMessages = (
     yield* Effect.yieldNow;
 
     return yield* waitForStoredSessionMessages(dbPath, expectedCount, remainingAttempts - 1);
+  });
+
+const waitForEffectPredicate = <Value>(
+  effect: Effect.Effect<Value, unknown>,
+  predicate: (value: Value) => boolean,
+  remainingAttempts = 100,
+): Effect.Effect<Value, unknown> =>
+  Effect.gen(function* waitForEffectPredicateEffect() {
+    const value = yield* effect;
+
+    if (predicate(value) || remainingAttempts <= 1) {
+      return value;
+    }
+
+    yield* Effect.yieldNow;
+
+    return yield* waitForEffectPredicate(effect, predicate, remainingAttempts - 1);
   });
 
 const makeSessionTestLayer = (
@@ -659,6 +677,45 @@ const makeMemoryAwareAiClient = () => {
     ),
     getRequests: Effect.sync(() => [...requests]),
   };
+};
+
+const makeAiFailureThenRecoveryLayer = (failuresBeforeSuccess: number): Layer.Layer<AiClient> => {
+  let failureCount = 0;
+
+  return Layer.succeed(
+    AiClient,
+    AiClient.of({
+      generateText: Effect.fn("AiClient.generateText")((request) =>
+        Effect.suspend(() => {
+          if (request.botName === "Director") {
+            return Effect.succeed({
+              costUsd: 0,
+              model: request.model,
+              text: '{"topicShift":false,"suggestedTopic":null,"vibe":"friendly","nudgeBot":null,"nudgeReason":null}',
+              tokensUsed: 5,
+            });
+          }
+
+          if (failureCount < failuresBeforeSuccess) {
+            failureCount += 1;
+            return Effect.fail(
+              new AiGenerationError({
+                botName: request.botName,
+                model: request.model,
+              }),
+            );
+          }
+
+          return Effect.succeed({
+            costUsd: 0,
+            model: request.model,
+            text: `${request.botName}: recovered reply`,
+            tokensUsed: 15,
+          });
+        }),
+      ),
+    }),
+  );
 };
 
 describe("session service", () => {
@@ -877,6 +934,201 @@ describe("session service", () => {
           username: "viewer-stream",
         }),
       );
+    }),
+  );
+
+  it.effect("tracks live auth failures as offline bot runtime statuses", () =>
+    Effect.gen(function* tracksLiveAuthFailuresAsOfflineBotRuntimeStatuses() {
+      const dbPath = yield* createDatabasePath;
+      const authorizedBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-twitch-authorized"),
+        name: "pixel_bot",
+        platform: "twitch",
+      });
+      const missingAuthBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-twitch-missing"),
+        name: "echo_bot",
+        displayName: "Echo",
+        platform: "twitch",
+      });
+      const twitchChatClient = new FakeTwitchSessionChatClient();
+      const sessionLayer = makeTwitchSessionTestLayer(dbPath, twitchChatClient);
+
+      yield* insertStoredBot(dbPath, authorizedBot);
+      yield* insertStoredBot(dbPath, missingAuthBot);
+      yield* insertChannelSetting(dbPath, "#Lonely_Channel");
+
+      const runtimeState = yield* Effect.gen(function* exerciseLiveAuthFailureState() {
+        const botService = yield* BotService;
+        const sessionService = yield* SessionService;
+
+        yield* botService.upsertBotToken(makeStoredBotToken(authorizedBot));
+        yield* sessionService.startSession();
+
+        return {
+          signals: yield* waitForEffectPredicate(sessionService.getBotRuntimeSignals(), (signals) =>
+            signals.some((signal) => signal.type === "auth_failure"),
+          ),
+          statuses: yield* waitForEffectPredicate(
+            sessionService.getBotRuntimeStatuses(),
+            (statuses) => statuses.length === 2,
+          ),
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(
+        runtimeState.statuses
+          .map((status) => ({
+            botId: status.botId,
+            detail: status.detail,
+            state: status.state,
+          }))
+          .toSorted((left, right) => left.botId.localeCompare(right.botId)),
+      ).toEqual([
+        {
+          botId: authorizedBot.id,
+          detail: "Pixel is connected for the live session.",
+          state: "online",
+        },
+        {
+          botId: missingAuthBot.id,
+          detail: "Echo is offline because live credentials are missing.",
+          state: "offline",
+        },
+      ]);
+      expect(
+        runtimeState.signals.map((signal) => ({
+          botId: signal.botId,
+          message: signal.message,
+          type: signal.type,
+        })),
+      ).toEqual([
+        {
+          botId: missingAuthBot.id,
+          message: "Echo is offline because live credentials are missing.",
+          type: "auth_failure",
+        },
+      ]);
+    }),
+  );
+
+  it.effect(
+    "marks bots degraded after repeated AI failures and emits recovery when generation resumes",
+    () =>
+      Effect.gen(
+        function* marksBotsDegradedAfterRepeatedAiFailuresAndEmitsRecoveryWhenGenerationResumes() {
+          const dbPath = yield* createDatabasePath;
+          const bot = makeStoredBot({
+            id: PersistedBotId.makeUnsafe("bot-ai-flaky"),
+            name: "pixel",
+            platform: "twitch",
+            talkativeness: 0,
+          });
+          const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+          const platformLayer = Layer.succeed(
+            PlatformAdapter,
+            PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+          );
+          const aiLayer = makeAiFailureThenRecoveryLayer(3);
+          const sessionLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+
+          yield* insertStoredBot(dbPath, bot);
+
+          const runtimeState = yield* Effect.gen(function* exerciseAiFailureRecovery() {
+            const sessionService = yield* SessionService;
+
+            yield* sessionService.startSession();
+
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+              yield* mockPlatformAdapter.emitIncomingMessage({
+                channel: mockBot.channel,
+                text: "@pixel say something",
+                username: ChatUsername.makeUnsafe(`viewer-${attempt}`),
+              });
+              yield* TestClock.adjust("4 seconds");
+            }
+
+            return {
+              signals: yield* waitForEffectPredicate(
+                sessionService.getBotRuntimeSignals(),
+                (signals) => signals.some((signal) => signal.type === "recovered"),
+              ),
+              statuses: yield* waitForEffectPredicate(
+                sessionService.getBotRuntimeStatuses(),
+                (statuses) => statuses[0]?.state === "online",
+              ),
+            };
+          }).pipe(Effect.provide(sessionLayer));
+
+          expect(runtimeState.statuses).toHaveLength(1);
+          expect(runtimeState.statuses[0]?.state).toBe("online");
+          expect(runtimeState.statuses[0]?.consecutiveAiFailures).toBe(0);
+          expect(runtimeState.signals.some((signal) => signal.type === "degraded")).toBe(true);
+          expect(runtimeState.signals.some((signal) => signal.type === "recovered")).toBe(true);
+        },
+      ),
+  );
+
+  it.effect("records reconnect attempts before returning a bot to online status", () =>
+    Effect.gen(function* recordsReconnectAttemptsBeforeReturningABotToOnlineStatus() {
+      const dbPath = yield* createDatabasePath;
+      const bot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-connect-retry"),
+        name: "pixel",
+        talkativeness: 0,
+      });
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      let shouldFailNextConnect = true;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of({
+          connect: Effect.fn("PlatformAdapter.connect")((connection) =>
+            Effect.suspend(() => {
+              if (shouldFailNextConnect) {
+                shouldFailNextConnect = false;
+                return Effect.fail({
+                  _tag: "PlatformConnectionError" as const,
+                  botId: connection.botId,
+                  platform: connection.platform,
+                });
+              }
+
+              return mockPlatformAdapter.platformAdapter.connect(connection);
+            }),
+          ),
+          disconnect: mockPlatformAdapter.platformAdapter.disconnect,
+          listenChat: mockPlatformAdapter.platformAdapter.listenChat,
+          sendMessage: mockPlatformAdapter.platformAdapter.sendMessage,
+        }),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      yield* insertStoredBot(dbPath, bot);
+
+      const runtimeState = yield* Effect.gen(function* exerciseReconnectSignal() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "@pixel reconnect please",
+          username: ChatUsername.makeUnsafe("viewer-reconnect"),
+        });
+        yield* TestClock.adjust("4 seconds");
+
+        return {
+          signals: yield* waitForEffectPredicate(sessionService.getBotRuntimeSignals(), (signals) =>
+            signals.some((signal) => signal.type === "reconnect_attempt"),
+          ),
+          statuses: yield* waitForEffectPredicate(
+            sessionService.getBotRuntimeStatuses(),
+            (statuses) => statuses[0]?.state === "online",
+          ),
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(runtimeState.signals.some((signal) => signal.type === "reconnect_attempt")).toBe(true);
+      expect(runtimeState.statuses[0]?.state).toBe("online");
     }),
   );
 
@@ -1200,7 +1452,6 @@ describe("session service", () => {
         expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
 
         yield* TestClock.adjust("3 seconds");
-
         expect(yield* waitForStoredSessionMessages(dbPath, 3)).toHaveLength(3);
         expect(yield* mockPlatformAdapter.getSentMessages).toEqual([
           {

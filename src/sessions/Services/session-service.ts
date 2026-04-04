@@ -2,6 +2,7 @@ import type { Effect, Stream } from "effect";
 import { Schema, ServiceMap } from "effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import { BotId, BotPlatform } from "../../bots/bot-record";
 import type { ScenarioId } from "../../scenarios/scenario-record";
 import type { AnalyticsBotSummary, AnalyticsOverview } from "../session-analytics";
 import type { SessionMessageRecord } from "../session-message-record";
@@ -43,12 +44,51 @@ export class SessionAlert extends Schema.Class<SessionAlert>("lonely-chat/sessio
   thresholdPercent: Schema.Number,
 }) {}
 
+export const BotRuntimeState = Schema.Literals(["online", "degraded", "offline"]);
+export type BotRuntimeState = typeof BotRuntimeState.Type;
+
+export const BotRuntimeSignalType = Schema.Literals([
+  "auth_failure",
+  "ai_failure",
+  "degraded",
+  "offline",
+  "reconnect_attempt",
+  "recovered",
+]);
+export type BotRuntimeSignalType = typeof BotRuntimeSignalType.Type;
+
+export class BotRuntimeStatus extends Schema.Class<BotRuntimeStatus>(
+  "lonely-chat/sessions/BotRuntimeStatus",
+)({
+  botId: BotId,
+  botName: Schema.String,
+  consecutiveAiFailures: Schema.Number,
+  detail: Schema.String,
+  displayName: Schema.String,
+  platform: BotPlatform,
+  state: BotRuntimeState,
+  updatedAt: Schema.String,
+}) {}
+
+export class BotRuntimeSignal extends Schema.Class<BotRuntimeSignal>(
+  "lonely-chat/sessions/BotRuntimeSignal",
+)({
+  botId: BotId,
+  botName: Schema.String,
+  createdAt: Schema.String,
+  message: Schema.String,
+  platform: BotPlatform,
+  type: BotRuntimeSignalType,
+}) {}
+
 export interface SessionServiceShape {
   readonly exportSession: (
     sessionId: SessionId,
     format: SessionExportFormat,
   ) => Effect.Effect<string | null, SqlError>;
   readonly getActiveAlerts: () => Effect.Effect<readonly SessionAlert[]>;
+  readonly getBotRuntimeSignals: () => Effect.Effect<readonly BotRuntimeSignal[]>;
+  readonly getBotRuntimeStatuses: () => Effect.Effect<readonly BotRuntimeStatus[]>;
   readonly getAnalyticsBotSummaries: () => Effect.Effect<readonly AnalyticsBotSummary[], SqlError>;
   readonly getAnalyticsOverview: () => Effect.Effect<AnalyticsOverview, SqlError>;
   readonly getAnalyticsSessionHistory: () => Effect.Effect<readonly SessionRecord[], SqlError>;

@@ -210,7 +210,7 @@ Use it with:
 - Spec inputs: `specs/ui.md`, `specs/data.md`
 - Verify: analytics query tests, analytics UI test, `vp check`, targeted `vp test`
 
-### [ ] VS-24: Failure states, degraded bots, and recovery signals
+### [x] VS-24: Failure states, degraded bots, and recovery signals
 
 - Depends on: `VS-15`, `VS-19`, `VS-21`
 - Outcome: Auth failures, AI failures, reconnect attempts, and degraded bot states surface correctly in logs and UI.

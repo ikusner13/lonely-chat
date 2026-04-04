@@ -53,7 +53,10 @@ import type {
 } from "../../platforms/Services/platform-adapter";
 import type { ScenarioId, ScenarioRecord, ScenarioStep } from "../../scenarios/scenario-record";
 import { ScenarioService } from "../../scenarios/Services/scenario-service";
+import type { BotRuntimeSignalType } from "../Services/session-service";
 import {
+  BotRuntimeSignal,
+  BotRuntimeStatus,
   SessionAlert,
   SessionService,
   SessionId,
@@ -77,6 +80,7 @@ const sessionStartedStatus: SessionStatus = "active";
 const sessionTimedOutStatus: SessionStatus = "timeout";
 const sessionCostLimitStatus: SessionStatus = "cost_limit";
 const liveBufferCapacity = 128;
+const botRuntimeSignalHistoryLimit = 24;
 const silenceThresholdMs = 15_000;
 const sessionLimitCheckInterval = Duration.seconds(1);
 const alertThresholdPercents = [50, 75, 90] as const;
@@ -159,6 +163,22 @@ interface BotMemorySummaryCandidate {
   readonly bot: BotRecord;
   readonly sourceMessages: readonly SessionMessageRecord[];
 }
+
+interface BotFailureStatus {
+  readonly consecutiveAiFailures: number;
+  readonly state: BotRuntimeStatus["state"];
+}
+
+const isConnectionTracked = (
+  trackedConnections: readonly BotConnection[],
+  connection: BotConnection,
+): boolean =>
+  trackedConnections.some(
+    (trackedConnection) =>
+      trackedConnection.botId === connection.botId &&
+      trackedConnection.channel === connection.channel &&
+      trackedConnection.platform === connection.platform,
+  );
 
 const sessionExportCsvHeader = [
   "timestamp",
@@ -376,6 +396,8 @@ export const SessionServiceLive = Layer.effect(
         ),
       );
       const activeAlertsRef = yield* Ref.make<readonly SessionAlert[]>([]);
+      const botRuntimeSignalsRef = yield* Ref.make<readonly BotRuntimeSignal[]>([]);
+      const botRuntimeStatusesRef = yield* Ref.make<readonly BotRuntimeStatus[]>([]);
       const messageListenerRef = yield* Ref.make<MessageListenerFiber | null>(null);
       const scenarioFiberRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const scheduledResponseFibersRef = yield* Ref.make<readonly SessionTaskFiber[]>([]);
@@ -412,6 +434,134 @@ export const SessionServiceLive = Layer.effect(
           yield* Ref.set(activeSessionRef, nextSession);
 
           return nextSession;
+        },
+      );
+
+      const emitBotRuntimeSignal = Effect.fn("SessionService.emitBotRuntimeSignal")(
+        function* emitBotRuntimeSignalEffect(
+          bot: BotRecord,
+          type: BotRuntimeSignalType,
+          message: string,
+        ) {
+          const signal = new BotRuntimeSignal({
+            botId: bot.id,
+            botName: bot.name,
+            createdAt: yield* getCurrentTimestamp(),
+            message,
+            platform: bot.platform,
+            type,
+          });
+
+          yield* Ref.update(botRuntimeSignalsRef, (signals) =>
+            [...signals, signal].slice(-botRuntimeSignalHistoryLimit),
+          );
+        },
+      );
+
+      const upsertBotRuntimeStatus = Effect.fn("SessionService.upsertBotRuntimeStatus")(
+        function* upsertBotRuntimeStatusEffect(
+          bot: BotRecord,
+          nextStatus: BotFailureStatus & {
+            readonly detail: string;
+          },
+        ) {
+          const updatedStatus = new BotRuntimeStatus({
+            botId: bot.id,
+            botName: bot.name,
+            consecutiveAiFailures: nextStatus.consecutiveAiFailures,
+            detail: nextStatus.detail,
+            displayName: bot.displayName,
+            platform: bot.platform,
+            state: nextStatus.state,
+            updatedAt: yield* getCurrentTimestamp(),
+          });
+
+          yield* Ref.update(botRuntimeStatusesRef, (statuses) => {
+            const existingIndex = statuses.findIndex((status) => status.botId === bot.id);
+
+            if (existingIndex === -1) {
+              return [...statuses, updatedStatus];
+            }
+
+            return statuses.map((status, index) =>
+              index === existingIndex ? updatedStatus : status,
+            );
+          });
+
+          return updatedStatus;
+        },
+      );
+
+      const getBotRuntimeStatus = Effect.fn("SessionService.getBotRuntimeStatus")(
+        function* getBotRuntimeStatusEffect(botId: BotRecord["id"]) {
+          const statuses = yield* Ref.get(botRuntimeStatusesRef);
+
+          return statuses.find((status) => status.botId === botId) ?? null;
+        },
+      );
+
+      const markBotOnline = Effect.fn("SessionService.markBotOnline")(function* markBotOnlineEffect(
+        bot: BotRecord,
+        detail: string,
+      ) {
+        const currentStatus = yield* getBotRuntimeStatus(bot.id);
+        const shouldEmitRecoveredSignal =
+          currentStatus !== null &&
+          (currentStatus.state !== "online" || currentStatus.consecutiveAiFailures > 0);
+
+        yield* upsertBotRuntimeStatus(bot, {
+          consecutiveAiFailures: 0,
+          detail,
+          state: "online",
+        });
+
+        if (shouldEmitRecoveredSignal) {
+          yield* emitBotRuntimeSignal(
+            bot,
+            "recovered",
+            `${bot.displayName} recovered and is online.`,
+          );
+        }
+      });
+
+      const markBotOffline = Effect.fn("SessionService.markBotOffline")(
+        function* markBotOfflineEffect(
+          bot: BotRecord,
+          detail: string,
+          signalType: Extract<BotRuntimeSignalType, "auth_failure" | "offline">,
+        ) {
+          yield* upsertBotRuntimeStatus(bot, {
+            consecutiveAiFailures: 0,
+            detail,
+            state: "offline",
+          });
+          yield* emitBotRuntimeSignal(bot, signalType, detail);
+        },
+      );
+
+      const recordAiFailure = Effect.fn("SessionService.recordAiFailure")(
+        function* recordAiFailureEffect(bot: BotRecord) {
+          const currentStatus = yield* getBotRuntimeStatus(bot.id);
+          const nextFailureCount = (currentStatus?.consecutiveAiFailures ?? 0) + 1;
+          const degraded = nextFailureCount >= 3;
+          const detail = degraded
+            ? `${bot.displayName} is degraded after ${nextFailureCount} consecutive AI failures.`
+            : `${bot.displayName} AI generation failed ${nextFailureCount} time${nextFailureCount === 1 ? "" : "s"} in a row.`;
+
+          yield* upsertBotRuntimeStatus(bot, {
+            consecutiveAiFailures: nextFailureCount,
+            detail,
+            state: degraded ? "degraded" : "online",
+          });
+          yield* emitBotRuntimeSignal(bot, "ai_failure", detail);
+
+          if (degraded && currentStatus?.state !== "degraded") {
+            yield* emitBotRuntimeSignal(
+              bot,
+              "degraded",
+              `${bot.displayName} entered degraded mode after repeated AI failures.`,
+            );
+          }
         },
       );
 
@@ -480,6 +630,80 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const initializeBotRuntimeStatuses = Effect.fn("SessionService.initializeBotRuntimeStatuses")(
+        function* initializeBotRuntimeStatusesEffect(session: SessionRecord) {
+          const sessionBots = yield* listSessionBots(session.platform);
+          const initialStatuses: BotRuntimeStatus[] = [];
+          const initialSignals: BotRuntimeSignal[] = [];
+
+          for (const bot of sessionBots) {
+            const timestamp = yield* getCurrentTimestamp();
+
+            if (session.platform === mockPlatform) {
+              initialStatuses.push(
+                new BotRuntimeStatus({
+                  botId: bot.id,
+                  botName: bot.name,
+                  consecutiveAiFailures: 0,
+                  detail: `${bot.displayName} is ready for the active session.`,
+                  displayName: bot.displayName,
+                  platform: bot.platform,
+                  state: "online",
+                  updatedAt: timestamp,
+                }),
+              );
+              continue;
+            }
+
+            const token = yield* botService.getBotToken(bot.id);
+
+            if (token === null) {
+              const detail = `${bot.displayName} is offline because live credentials are missing.`;
+
+              initialStatuses.push(
+                new BotRuntimeStatus({
+                  botId: bot.id,
+                  botName: bot.name,
+                  consecutiveAiFailures: 0,
+                  detail,
+                  displayName: bot.displayName,
+                  platform: bot.platform,
+                  state: "offline",
+                  updatedAt: timestamp,
+                }),
+              );
+              initialSignals.push(
+                new BotRuntimeSignal({
+                  botId: bot.id,
+                  botName: bot.name,
+                  createdAt: timestamp,
+                  message: detail,
+                  platform: bot.platform,
+                  type: "auth_failure",
+                }),
+              );
+              continue;
+            }
+
+            initialStatuses.push(
+              new BotRuntimeStatus({
+                botId: bot.id,
+                botName: bot.name,
+                consecutiveAiFailures: 0,
+                detail: `${bot.displayName} is connected for the live session.`,
+                displayName: bot.displayName,
+                platform: bot.platform,
+                state: "online",
+                updatedAt: timestamp,
+              }),
+            );
+          }
+
+          yield* Ref.set(botRuntimeStatusesRef, initialStatuses);
+          yield* Ref.set(botRuntimeSignalsRef, initialSignals);
+        },
+      );
+
       const connectSessionBot = Effect.fn("SessionService.connectSessionBot")(
         function* connectSessionBotEffect(connection: BotConnection) {
           const connectedBots = yield* Ref.get(connectedBotsRef);
@@ -497,6 +721,70 @@ export const SessionServiceLive = Layer.effect(
 
           yield* platformAdapter.connect(connection);
           yield* Ref.set(connectedBotsRef, [...connectedBots, connection]);
+        },
+      );
+
+      const discardPendingGeneratedMessage = Effect.fn(
+        "SessionService.discardPendingGeneratedMessage",
+      )(function* discardPendingGeneratedMessageEffect(pendingMessage: PendingGeneratedMessage) {
+        yield* Ref.update(pendingGeneratedMessagesRef, (messages) =>
+          messages.filter(
+            (message) =>
+              !(
+                message.botId === pendingMessage.botId &&
+                message.platform === pendingMessage.platform &&
+                message.text === pendingMessage.text &&
+                message.username === pendingMessage.username
+              ),
+          ),
+        );
+      });
+
+      const tryConnectSpeaker = Effect.fn("SessionService.tryConnectSpeaker")(
+        function* tryConnectSpeakerEffect(bot: BotRecord, connection: BotConnection) {
+          const alreadyTracked = isConnectionTracked(yield* Ref.get(connectedBotsRef), connection);
+          const connected = yield* connectSessionBot(connection).pipe(
+            Effect.as(true),
+            Effect.catch(() => Effect.succeed(false)),
+          );
+
+          if (!connected) {
+            return false;
+          }
+
+          if (!alreadyTracked) {
+            yield* markBotOnline(bot, `${bot.displayName} is connected and ready.`);
+          }
+
+          return true;
+        },
+      );
+
+      const ensureSpeakerConnected = Effect.fn("SessionService.ensureSpeakerConnected")(
+        function* ensureSpeakerConnectedEffect(bot: BotRecord, connection: BotConnection) {
+          if (yield* tryConnectSpeaker(bot, connection)) {
+            return true;
+          }
+
+          yield* emitBotRuntimeSignal(
+            bot,
+            "reconnect_attempt",
+            `Retrying ${bot.displayName} after a platform connection failure.`,
+          );
+          yield* Effect.sleep(Duration.seconds(1));
+
+          if (yield* tryConnectSpeaker(bot, connection)) {
+            yield* markBotOnline(bot, `${bot.displayName} reconnected successfully.`);
+            return true;
+          }
+
+          yield* markBotOffline(
+            bot,
+            `${bot.displayName} is offline because the platform connection failed.`,
+            "offline",
+          );
+
+          return false;
         },
       );
 
@@ -1011,6 +1299,8 @@ export const SessionServiceLive = Layer.effect(
         yield* generateBotMemories(endedSession).pipe(Effect.catch(() => Effect.void));
         yield* Ref.set(activeSessionRef, null);
         yield* Ref.set(activeAlertsRef, []);
+        yield* Ref.set(botRuntimeSignalsRef, []);
+        yield* Ref.set(botRuntimeStatusesRef, []);
         yield* Ref.set(connectedBotsRef, []);
         yield* Ref.set(lastActivityAtRef, null);
         yield* Ref.set(pendingGeneratedMessagesRef, []);
@@ -1083,8 +1373,25 @@ export const SessionServiceLive = Layer.effect(
             username: ChatUsername.makeUnsafe(bot.name),
           } as const;
 
-          yield* connectSessionBot(speakerConnection);
-          yield* platformAdapter.sendMessage(speakerConnection, text);
+          if (!(yield* ensureSpeakerConnected(bot, speakerConnection))) {
+            return false;
+          }
+
+          const sent = yield* platformAdapter.sendMessage(speakerConnection, text).pipe(
+            Effect.as(true),
+            Effect.catch(() => Effect.succeed(false)),
+          );
+
+          if (!sent) {
+            yield* markBotOffline(
+              bot,
+              `${bot.displayName} is offline because the platform send failed.`,
+              "offline",
+            );
+            return false;
+          }
+
+          yield* markBotOnline(bot, `${bot.displayName} sent a message successfully.`);
           yield* Ref.set(
             speakerStatesRef,
             advanceSpeakerState(
@@ -1093,6 +1400,8 @@ export const SessionServiceLive = Layer.effect(
               yield* Clock.currentTimeMillis,
             ),
           );
+
+          return true;
         },
       );
 
@@ -1135,6 +1444,7 @@ export const SessionServiceLive = Layer.effect(
 
       const sendGeneratedMessage = Effect.fn("SessionService.sendGeneratedMessage")(
         function* sendGeneratedMessageEffect(
+          bot: BotRecord,
           speakerConnection: {
             readonly botId: PlatformBotId;
             readonly channel: SessionRecord["channel"];
@@ -1143,7 +1453,7 @@ export const SessionServiceLive = Layer.effect(
           },
           response: AiGenerateResponse,
         ) {
-          yield* registerPendingGeneratedMessage({
+          const pendingMessage = {
             botId: speakerConnection.botId,
             costUsd: response.costUsd,
             modelUsed: response.model,
@@ -1151,9 +1461,28 @@ export const SessionServiceLive = Layer.effect(
             text: response.text,
             tokensUsed: response.tokensUsed,
             username: speakerConnection.username,
-          });
-          yield* platformAdapter.sendMessage(speakerConnection, response.text);
+          } satisfies PendingGeneratedMessage;
+
+          yield* registerPendingGeneratedMessage(pendingMessage);
+          const sent = yield* platformAdapter.sendMessage(speakerConnection, response.text).pipe(
+            Effect.as(true),
+            Effect.catch(() => Effect.succeed(false)),
+          );
+
+          if (!sent) {
+            yield* discardPendingGeneratedMessage(pendingMessage);
+            yield* markBotOffline(
+              bot,
+              `${bot.displayName} is offline because the platform send failed.`,
+              "offline",
+            );
+            return false;
+          }
+
           yield* recordCost(response.tokensUsed, response.costUsd);
+          yield* markBotOnline(bot, `${bot.displayName} recovered and sent a response.`);
+
+          return true;
         },
       );
 
@@ -1192,19 +1521,30 @@ export const SessionServiceLive = Layer.effect(
                   username: ChatUsername.makeUnsafe(bot.name),
                 } as const;
                 const botMemories = yield* getBotMemories(bot.id);
-                yield* connectSessionBot(speakerConnection);
-                const response = yield* aiClient.generateText(
-                  makeScenarioResponseRequest(
-                    bot,
-                    session.platform,
-                    yield* getSessionMessages(session.id),
-                    scenario.topic,
-                    step.content,
-                    botMemories,
-                  ),
+                if (!(yield* ensureSpeakerConnected(bot, speakerConnection))) {
+                  break;
+                }
+                const request = makeScenarioResponseRequest(
+                  bot,
+                  session.platform,
+                  yield* getSessionMessages(session.id),
+                  scenario.topic,
+                  step.content,
+                  botMemories,
+                );
+                const generatedResponse = yield* aiClient.generateText(request).pipe(
+                  Effect.map((response) => response),
+                  Effect.catch(() => Effect.succeed(null)),
                 );
 
-                yield* sendGeneratedMessage(speakerConnection, response);
+                if (generatedResponse === null) {
+                  yield* recordAiFailure(bot);
+                  break;
+                }
+
+                if (!(yield* sendGeneratedMessage(bot, speakerConnection, generatedResponse))) {
+                  break;
+                }
                 yield* Ref.set(
                   speakerStatesRef,
                   advanceSpeakerState(
@@ -1253,8 +1593,9 @@ export const SessionServiceLive = Layer.effect(
             }
 
             const now = yield* Clock.currentTimeMillis;
+            const speakerStates = yield* Ref.get(speakerStatesRef);
 
-            if (!isEligibleSpeaker(bot, yield* Ref.get(speakerStatesRef), now)) {
+            if (!isEligibleSpeaker(bot, speakerStates, now)) {
               return;
             }
 
@@ -1265,12 +1606,25 @@ export const SessionServiceLive = Layer.effect(
               username: ChatUsername.makeUnsafe(bot.name),
             } as const;
 
-            yield* connectSessionBot(speakerConnection);
+            if (!(yield* ensureSpeakerConnected(bot, speakerConnection))) {
+              return;
+            }
 
             const directorHint = yield* consumeDirectorHint();
-            const response = yield* aiClient.generateText(yield* buildRequest(directorHint));
+            const request = yield* buildRequest(directorHint);
+            const generatedResponse = yield* aiClient.generateText(request).pipe(
+              Effect.map((response) => response),
+              Effect.catch(() => Effect.succeed(null)),
+            );
 
-            yield* sendGeneratedMessage(speakerConnection, response);
+            if (generatedResponse === null) {
+              yield* recordAiFailure(bot);
+              return;
+            }
+
+            if (!(yield* sendGeneratedMessage(bot, speakerConnection, generatedResponse))) {
+              return;
+            }
             yield* Ref.set(
               speakerStatesRef,
               advanceSpeakerState(
@@ -1429,6 +1783,18 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const getBotRuntimeSignals = Effect.fn("SessionService.getBotRuntimeSignals")(
+        function* getBotRuntimeSignalsEffect() {
+          return yield* Ref.get(botRuntimeSignalsRef);
+        },
+      );
+
+      const getBotRuntimeStatuses = Effect.fn("SessionService.getBotRuntimeStatuses")(
+        function* getBotRuntimeStatusesEffect() {
+          return yield* Ref.get(botRuntimeStatusesRef);
+        },
+      );
+
       const getActiveSession = Effect.fn("SessionService.getActiveSession")(
         function* getActiveSessionEffect() {
           yield* checkTimeLimit();
@@ -1582,6 +1948,7 @@ export const SessionServiceLive = Layer.effect(
             )`;
         yield* Ref.set(activeSessionRef, session);
         yield* Ref.set(activeAlertsRef, []);
+        yield* initializeBotRuntimeStatuses(session);
         yield* Ref.set(speakerStatesRef, []);
         yield* Ref.set(connectedBotsRef, []);
         yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
@@ -1618,6 +1985,8 @@ export const SessionServiceLive = Layer.effect(
         service: SessionService.of({
           exportSession,
           getActiveAlerts,
+          getBotRuntimeSignals,
+          getBotRuntimeStatuses,
           getActiveSession,
           getAnalyticsBotSummaries,
           getAnalyticsOverview,

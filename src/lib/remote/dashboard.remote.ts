@@ -9,6 +9,12 @@ export const getDashboardState = query(async () =>
     Effect.all({
       activeAlerts: SessionService.use((sessionService) => sessionService.getActiveAlerts()),
       activeSession: SessionService.use((sessionService) => sessionService.getActiveSession()),
+      botRuntimeSignals: SessionService.use((sessionService) =>
+        sessionService.getBotRuntimeSignals(),
+      ),
+      botRuntimeStatuses: SessionService.use((sessionService) =>
+        sessionService.getBotRuntimeStatuses(),
+      ),
       mostRecentSession: SessionService.use((sessionService) =>
         sessionService.getMostRecentSession(),
       ),

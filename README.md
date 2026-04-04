@@ -8,6 +8,8 @@ AI-powered Twitch chat bots that create engaging, personality-driven conversatio
 pnpm install
 ```
 
+See [Platform Setup](docs/platform-setup.md) for Twitch and Kick configuration, OAuth callbacks, and bot authorization.
+
 ## Commands
 
 ```bash
