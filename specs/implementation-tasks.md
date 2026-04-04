@@ -173,7 +173,7 @@ Use it with:
 - Spec inputs: `specs/platforms.md`, `specs/data.md`, `specs/ui.md`, `specs/bots.md`
 - Verify: token storage/status tests, auth status UI tests, `vp check`, targeted `vp test`
 
-### [ ] VS-19: Twitch auth and send-message tracer bullet
+### [x] VS-19: Twitch auth and send-message tracer bullet
 
 - Depends on: `VS-18`
 - Outcome: One Twitch bot can authorize, connect, and send a test message through the production adapter.

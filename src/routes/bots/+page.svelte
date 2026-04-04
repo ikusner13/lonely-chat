@@ -4,14 +4,16 @@
 		createBot,
 		updateBot,
 		saveBotToken,
-		previewBot
+		previewBot,
+		sendTwitchTestMessage
 	} from '$lib/remote/bots.remote';
 	import type {
 		BotAuthStatusRecord,
 		BotEditorFormErrors,
 		BotRecord,
 		BotTokenFormInput,
-		BotTokenRecord
+		BotTokenRecord,
+		TwitchTestMessageFormInput
 	} from '$lib/remote/bots.remote';
 	import {
 		getBotAuthStatusBadgeClass,
@@ -59,6 +61,15 @@
 			expiresAt?: string;
 			refreshToken?: string;
 			scopes?: string;
+		};
+	}
+
+	interface SendTwitchTestMessageResult {
+		ok: boolean;
+		errors: {
+			channel?: string;
+			general?: string;
+			text?: string;
 		};
 	}
 
@@ -111,6 +122,11 @@
 		scopes: token?.scopes.join('\n') ?? '',
 	});
 
+	const emptyTwitchTestMessageForm = (): TwitchTestMessageFormInput => ({
+		channel: '',
+		text: 'lonely chat tracer bullet online',
+	});
+
 	let expandedBotId: string | null = $state(null);
 	let showCreateForm = $state(false);
 
@@ -152,6 +168,17 @@
 	> = $state({});
 	const tokenSaving: Record<string, boolean> = $state({});
 	const tokenSuccess: Record<string, boolean> = $state({});
+	const twitchTestMessageForms: Record<string, TwitchTestMessageFormInput> = $state({});
+	const twitchTestMessageErrors: Record<
+		string,
+		{
+			channel?: string;
+			general?: string;
+			text?: string;
+		}
+	> = $state({});
+	const twitchTestMessageSaving: Record<string, boolean> = $state({});
+	const twitchTestMessageSuccess: Record<string, boolean> = $state({});
 
 	const initEditForm = (bot: BotRecord) => {
 		if (editForms[bot.id]) {
@@ -166,6 +193,14 @@
 		}
 
 		tokenForms[botId] = tokenFormStateFromToken(token);
+	};
+
+	const initTwitchTestMessageForm = (botId: string) => {
+		if (twitchTestMessageForms[botId]) {
+			return;
+		}
+
+		twitchTestMessageForms[botId] = emptyTwitchTestMessageForm();
 	};
 
 	const handleUpdate = async (botId: string) => {
@@ -202,6 +237,28 @@
 			}
 		} finally {
 			tokenSaving[botId] = false;
+		}
+	};
+
+	const handleTwitchTestMessage = async (botId: string) => {
+		const form = twitchTestMessageForms[botId];
+		if (!form) {
+			return;
+		}
+
+		twitchTestMessageSaving[botId] = true;
+		twitchTestMessageSuccess[botId] = false;
+		try {
+			const result = (await sendTwitchTestMessage({
+				botId,
+				values: form,
+			})) as SendTwitchTestMessageResult;
+			twitchTestMessageErrors[botId] = result.errors;
+			if (result.ok) {
+				twitchTestMessageSuccess[botId] = true;
+			}
+		} finally {
+			twitchTestMessageSaving[botId] = false;
 		}
 	};
 
@@ -300,6 +357,58 @@
 			</button>
 			{#if success}
 				<span class="text-sm text-green-400">Credential metadata saved.</span>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
+{#snippet twitchTracerSection(
+	botId: string,
+	form: TwitchTestMessageFormInput,
+	errors: {
+		channel?: string;
+		general?: string;
+		text?: string;
+	},
+	saving: boolean,
+	success: boolean,
+)}
+	<div class="mt-4 rounded-md border border-zinc-800 bg-zinc-950 p-4">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h4 class="text-xs font-medium text-zinc-400">Twitch Tracer Bullet</h4>
+				<p class="mt-1 text-xs text-zinc-500">
+					Authorize this bot, then send one live test message through the production Twitch chat
+					client.
+				</p>
+			</div>
+			<a
+				href={`/auth/twitch/start?botId=${botId}`}
+				class="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900"
+			>
+				Authorize on Twitch
+			</a>
+		</div>
+
+		<div class="mt-4 grid gap-4 sm:grid-cols-2">
+			{@render textInput('Channel', form.channel, (v) => (form.channel = v), errors.channel)}
+			{@render textInput('Test Message', form.text, (v) => (form.text = v), errors.text)}
+		</div>
+
+		{#if errors.general}
+			<p class="mt-3 text-sm text-red-400">{errors.general}</p>
+		{/if}
+
+		<div class="mt-4 flex items-center gap-3">
+			<button
+				onclick={() => handleTwitchTestMessage(botId)}
+				disabled={saving}
+				class="rounded-md bg-violet-200 px-4 py-1.5 text-sm font-medium text-zinc-950 transition-colors hover:bg-violet-100 disabled:opacity-50"
+			>
+				{saving ? 'Sending...' : 'Send Test Message'}
+			</button>
+			{#if success}
+				<span class="text-sm text-green-400">Test message sent.</span>
 			{/if}
 		</div>
 	</div>
@@ -547,8 +656,9 @@
 			{@const expanded = expandedBotId === bot.id}
 			{(initEditForm(bot), '')}
 			{(initTokenForm(bot.id, item.token), '')}
+			{(initTwitchTestMessageForm(bot.id), '')}
 
-			<div class="mb-3 rounded-lg border border-zinc-800 bg-zinc-900">
+			<div id={`bot-${bot.id}`} class="mb-3 rounded-lg border border-zinc-800 bg-zinc-900">
 				<button
 					onclick={() => toggleBot(bot.id)}
 					class="flex w-full items-center justify-between px-4 py-3 text-left"
@@ -609,6 +719,15 @@
 							tokenSaving[bot.id] ?? false,
 							tokenSuccess[bot.id] ?? false,
 						)}
+						{#if bot.platform === 'twitch'}
+							{@render twitchTracerSection(
+								bot.id,
+								twitchTestMessageForms[bot.id]!,
+								twitchTestMessageErrors[bot.id] ?? {},
+								twitchTestMessageSaving[bot.id] ?? false,
+								twitchTestMessageSuccess[bot.id] ?? false,
+							)}
+						{/if}
 						{@render previewSection(bot.id)}
 					</div>
 				{/if}

@@ -16,6 +16,11 @@ import {
 } from "../../bots/bot-editor-fields";
 import type { BotEditorFormErrors } from "../../bots/bot-editor-fields";
 import { BotService } from "../../bots/Services/bot-service";
+import {
+  TwitchPlatformAdapter,
+  TwitchTestMessageRequest,
+} from "../../platforms/Services/twitch-platform-adapter";
+import { TwitchPlatformAdapterLive } from "../../platforms/Layers/twitch-platform-adapter";
 
 export const getBots = query(async () =>
   effectRunner(BotService.use((botService) => botService.listBots())),
@@ -68,6 +73,20 @@ interface BotTokenFormInput {
   readonly expiresAt: string;
   readonly refreshToken: string;
   readonly scopes: string;
+}
+
+interface SendTwitchTestMessageResult {
+  readonly errors: {
+    channel?: string;
+    general?: string;
+    text?: string;
+  };
+  readonly ok: boolean;
+}
+
+interface TwitchTestMessageFormInput {
+  readonly channel: string;
+  readonly text: string;
 }
 
 const trim = (value: string): string => value.trim();
@@ -214,6 +233,7 @@ export const saveBotToken = command(
 
 export { type BotRecord, type BotEditorFormErrors, type BotEditorFormInput };
 export { type BotAuthStatusRecord, type BotTokenFormInput, type BotTokenRecord };
+export { type TwitchTestMessageFormInput };
 
 export const previewBot = command(
   "unchecked",
@@ -250,5 +270,61 @@ export const previewBot = command(
       prompt,
       response: preview.text,
     };
+  },
+);
+
+export const sendTwitchTestMessage = command(
+  "unchecked",
+  async ({
+    botId,
+    values,
+  }: {
+    readonly botId: string;
+    readonly values: TwitchTestMessageFormInput;
+  }): Promise<SendTwitchTestMessageResult> => {
+    const channel = trim(values.channel);
+    const text = trim(values.text);
+    const errors: SendTwitchTestMessageResult["errors"] = {};
+
+    if (channel.length === 0) {
+      errors.channel = "Channel is required.";
+    }
+
+    if (text.length === 0) {
+      errors.text = "Message text is required.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return { errors, ok: false };
+    }
+
+    const result = await effectRunner(
+      TwitchPlatformAdapter.use((twitchPlatformAdapter) =>
+        twitchPlatformAdapter
+          .sendTestMessage(
+            new TwitchTestMessageRequest({
+              botId: BotId.makeUnsafe(botId),
+              channel,
+              text,
+            }),
+          )
+          .pipe(
+            Effect.as<SendTwitchTestMessageResult>({
+              errors: {},
+              ok: true,
+            }),
+            Effect.catchTag("TwitchPlatformError", (error) =>
+              Effect.succeed({
+                errors: { general: error.reason },
+                ok: false,
+              } satisfies SendTwitchTestMessageResult),
+            ),
+          ),
+      ).pipe(Effect.provide(TwitchPlatformAdapterLive)),
+    );
+
+    await getBotManagerData().refresh();
+
+    return result;
   },
 );
