@@ -166,7 +166,7 @@ Use it with:
 
 ## Track 5: Platform Integration Slices
 
-### [ ] VS-18: Persist bot tokens and show auth status
+### [x] VS-18: Persist bot tokens and show auth status
 
 - Depends on: `VS-01`
 - Outcome: The app can store token metadata, show status per bot, and represent valid, expired, and missing credentials.

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 
 import { makeDatabaseLayer } from "../db/database";
 import { SessionId } from "../sessions/Services/session-service";
+import { BotAuthStatusRecord, BotTokenId, BotTokenRecord } from "./bot-token-record";
 import { BotMemoryId, BotMemoryRecord } from "./bot-memory-record";
 import { BotId, BotRecord } from "./bot-record";
 import { BotServiceLive } from "./Layers/bot-service";
@@ -43,6 +44,17 @@ interface StoredBotMemoryRow {
   readonly created_at: string;
   readonly session_id: string;
   readonly summary: string;
+}
+
+interface StoredBotTokenRow {
+  readonly access_token: string;
+  readonly bot_id: string;
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly platform: string;
+  readonly refresh_token: string;
+  readonly scopes: string;
+  readonly updated_at: string;
 }
 
 const createDatabasePath = Effect.acquireRelease(
@@ -115,6 +127,28 @@ const loadStoredBotMemories = (
     }),
   );
 
+const loadStoredBotTokens = (
+  dbPath: string,
+): Effect.Effect<readonly StoredBotTokenRow[], unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* queryStoredBotTokens() {
+      const sql = yield* SqlClient.SqlClient;
+
+      return yield* sql<StoredBotTokenRow>`SELECT
+          bot_id,
+          platform,
+          access_token,
+          refresh_token,
+          scopes,
+          expires_at,
+          created_at,
+          updated_at
+        FROM bot_tokens
+        ORDER BY created_at ASC, rowid ASC`;
+    }),
+  );
+
 const insertStoredSession = (
   dbPath: string,
   sessionId: string,
@@ -181,6 +215,20 @@ const makeTestBot = (): BotRecord =>
     temperature: 0.6,
     updatedAt,
     vocabularyRules: ["Never apologize."],
+  });
+
+const makeTestToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>): BotTokenRecord =>
+  new BotTokenRecord({
+    accessToken: "access-token-1",
+    botId: bot.id,
+    createdAt,
+    expiresAt: "2026-04-04T00:00:00.000Z",
+    id: BotTokenId.makeUnsafe(`token-${bot.id}`),
+    platform: bot.platform,
+    refreshToken: "refresh-token-1",
+    scopes: ["chat:read", "chat:edit"],
+    updatedAt,
+    ...overrides,
   });
 
 describe("bot service", () => {
@@ -348,6 +396,181 @@ describe("bot service", () => {
           created_at: olderMemory.createdAt,
           session_id: olderMemory.sessionId,
           summary: olderMemory.summary,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("upserts bot tokens and persists token metadata", () =>
+    Effect.gen(function* upsertsBotTokensAndPersistsTokenMetadata() {
+      const dbPath = yield* createDatabasePath;
+      const botLayer = BotServiceLive.pipe(Layer.provide(makeDatabaseLayer(dbPath)));
+      const bot = makeTestBot();
+      const initialToken = makeTestToken(bot);
+      const refreshedToken = makeTestToken(bot, {
+        accessToken: "access-token-2",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+        id: BotTokenId.makeUnsafe("token-refreshed"),
+        refreshToken: "refresh-token-2",
+        scopes: ["chat:edit"],
+        updatedAt: "2026-04-03T00:00:02.000Z",
+      });
+
+      const storedToken = yield* Effect.gen(function* exerciseBotTokenPersistence() {
+        const botService = yield* BotService;
+
+        yield* botService.createBot(bot);
+        yield* botService.upsertBotToken(initialToken);
+
+        return yield* botService.upsertBotToken(refreshedToken);
+      }).pipe(Effect.provide(botLayer));
+
+      expect(storedToken).toEqual(
+        new BotTokenRecord({
+          accessToken: "access-token-2",
+          botId: bot.id,
+          createdAt: createdAt,
+          expiresAt: "2026-04-05T00:00:00.000Z",
+          id: BotTokenId.makeUnsafe(`token-${bot.id}`),
+          platform: bot.platform,
+          refreshToken: "refresh-token-2",
+          scopes: ["chat:edit"],
+          updatedAt: "2026-04-03T00:00:02.000Z",
+        }),
+      );
+      expect(yield* loadStoredBotTokens(dbPath)).toEqual([
+        {
+          access_token: "access-token-2",
+          bot_id: bot.id,
+          created_at: createdAt,
+          expires_at: "2026-04-05T00:00:00.000Z",
+          platform: bot.platform,
+          refresh_token: "refresh-token-2",
+          scopes: JSON.stringify(["chat:edit"]),
+          updated_at: "2026-04-03T00:00:02.000Z",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("lists valid, expired, and missing bot auth statuses", () =>
+    Effect.gen(function* listsValidExpiredAndMissingBotAuthStatuses() {
+      const dbPath = yield* createDatabasePath;
+      const botLayer = BotServiceLive.pipe(Layer.provide(makeDatabaseLayer(dbPath)));
+      const validBot = makeTestBot();
+      const expiredBot = new BotRecord({
+        createdAt,
+        description: "Pixel is neon and brief.",
+        displayName: "Expired Pixel",
+        enabled: true,
+        exampleMessages: ["expired ping"],
+        fallbackModels: ["openai/gpt-4o-mini"],
+        firstMessage: "expired hello",
+        id: BotId.makeUnsafe("bot-expired"),
+        maxTokens: 128,
+        model: "openai/gpt-4o-mini",
+        name: "expired_bot",
+        personality: "Sarcastic but focused.",
+        platform: "twitch",
+        postHistoryPrompt: "Stay sharp.",
+        responseLength: {
+          max: 12,
+          min: 4,
+        },
+        systemPrompt: null,
+        talkativeness: 42,
+        temperature: 0.8,
+        updatedAt,
+        vocabularyRules: ["avoid emojis"],
+      });
+      const missingBot = new BotRecord({
+        createdAt,
+        description: "Pixel is neon and brief.",
+        displayName: "Missing Pixel",
+        enabled: true,
+        exampleMessages: ["missing ping"],
+        fallbackModels: ["openai/gpt-4o-mini"],
+        firstMessage: "missing hello",
+        id: BotId.makeUnsafe("bot-missing"),
+        maxTokens: 128,
+        model: "openai/gpt-4o-mini",
+        name: "missing_bot",
+        personality: "Sarcastic but focused.",
+        platform: "twitch",
+        postHistoryPrompt: "Stay sharp.",
+        responseLength: {
+          max: 12,
+          min: 4,
+        },
+        systemPrompt: null,
+        talkativeness: 42,
+        temperature: 0.8,
+        updatedAt,
+        vocabularyRules: ["avoid emojis"],
+      });
+
+      const statuses = yield* Effect.gen(function* exerciseBotAuthStatuses() {
+        const botService = yield* BotService;
+
+        yield* botService.createBot(validBot);
+        yield* botService.createBot(expiredBot);
+        yield* botService.createBot(missingBot);
+        yield* botService.upsertBotToken(makeTestToken(validBot));
+        yield* botService.upsertBotToken(
+          makeTestToken(expiredBot, {
+            accessToken: "expired-access-token",
+            botId: expiredBot.id,
+            expiresAt: "2026-04-02T00:00:00.000Z",
+            id: BotTokenId.makeUnsafe("token-expired"),
+            refreshToken: "expired-refresh-token",
+          }),
+        );
+
+        return yield* botService.listBotsWithAuthStatus("2026-04-03T00:00:00.000Z");
+      }).pipe(Effect.provide(botLayer));
+
+      expect(statuses).toEqual([
+        {
+          auth: new BotAuthStatusRecord({
+            botId: expiredBot.id,
+            expiresAt: "2026-04-02T00:00:00.000Z",
+            platform: "twitch",
+            scopes: ["chat:read", "chat:edit"],
+            status: "expired",
+            updatedAt,
+          }),
+          bot: expiredBot,
+          token: makeTestToken(expiredBot, {
+            accessToken: "expired-access-token",
+            botId: expiredBot.id,
+            expiresAt: "2026-04-02T00:00:00.000Z",
+            id: BotTokenId.makeUnsafe("token-expired"),
+            refreshToken: "expired-refresh-token",
+          }),
+        },
+        {
+          auth: new BotAuthStatusRecord({
+            botId: missingBot.id,
+            expiresAt: null,
+            platform: "twitch",
+            scopes: [],
+            status: "missing",
+            updatedAt: null,
+          }),
+          bot: missingBot,
+          token: null,
+        },
+        {
+          auth: new BotAuthStatusRecord({
+            botId: validBot.id,
+            expiresAt: "2026-04-04T00:00:00.000Z",
+            platform: "twitch",
+            scopes: ["chat:read", "chat:edit"],
+            status: "valid",
+            updatedAt,
+          }),
+          bot: validBot,
+          token: makeTestToken(validBot),
         },
       ]);
     }),

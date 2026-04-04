@@ -1,6 +1,23 @@
 <script lang="ts">
-	import { getBots, createBot, updateBot, previewBot } from '$lib/remote/bots.remote';
-	import type { BotRecord, BotEditorFormErrors } from '$lib/remote/bots.remote';
+	import {
+		getBotManagerData,
+		createBot,
+		updateBot,
+		saveBotToken,
+		previewBot
+	} from '$lib/remote/bots.remote';
+	import type {
+		BotAuthStatusRecord,
+		BotEditorFormErrors,
+		BotRecord,
+		BotTokenFormInput,
+		BotTokenRecord
+	} from '$lib/remote/bots.remote';
+	import {
+		getBotAuthStatusBadgeClass,
+		getBotAuthStatusDetail,
+		getBotAuthStatusLabel
+	} from '../../bots/bot-auth-status-ui';
 
 	interface BotFormState {
 		name: string;
@@ -33,6 +50,16 @@
 		response: string | undefined;
 		model: string | undefined;
 		error: string | undefined;
+	}
+
+	interface SaveBotTokenResult {
+		ok: boolean;
+		errors: {
+			accessToken?: string;
+			expiresAt?: string;
+			refreshToken?: string;
+			scopes?: string;
+		};
 	}
 
 	const emptyFormState = (): BotFormState => ({
@@ -77,6 +104,13 @@
 		enabled: bot.enabled,
 	});
 
+	const tokenFormStateFromToken = (token: BotTokenRecord | null): BotTokenFormInput => ({
+		accessToken: token?.accessToken ?? '',
+		expiresAt: token?.expiresAt ?? '',
+		refreshToken: token?.refreshToken ?? '',
+		scopes: token?.scopes.join('\n') ?? '',
+	});
+
 	let expandedBotId: string | null = $state(null);
 	let showCreateForm = $state(false);
 
@@ -106,12 +140,32 @@
 	const editErrors: Record<string, BotEditorFormErrors> = $state({});
 	const editSaving: Record<string, boolean> = $state({});
 	const editSuccess: Record<string, boolean> = $state({});
+	const tokenForms: Record<string, BotTokenFormInput> = $state({});
+	const tokenErrors: Record<
+		string,
+		{
+			accessToken?: string;
+			expiresAt?: string;
+			refreshToken?: string;
+			scopes?: string;
+		}
+	> = $state({});
+	const tokenSaving: Record<string, boolean> = $state({});
+	const tokenSuccess: Record<string, boolean> = $state({});
 
 	const initEditForm = (bot: BotRecord) => {
 		if (editForms[bot.id]) {
 			return;
 		}
 		editForms[bot.id] = formStateFromBot(bot);
+	};
+
+	const initTokenForm = (botId: string, token: BotTokenRecord | null) => {
+		if (tokenForms[botId]) {
+			return;
+		}
+
+		tokenForms[botId] = tokenFormStateFromToken(token);
 	};
 
 	const handleUpdate = async (botId: string) => {
@@ -129,6 +183,25 @@
 			}
 		} finally {
 			editSaving[botId] = false;
+		}
+	};
+
+	const handleTokenSave = async (botId: string) => {
+		const form = tokenForms[botId];
+		if (!form) {
+			return;
+		}
+
+		tokenSaving[botId] = true;
+		tokenSuccess[botId] = false;
+		try {
+			const result = (await saveBotToken({ botId, values: form })) as SaveBotTokenResult;
+			tokenErrors[botId] = result.errors;
+			if (result.ok) {
+				tokenSuccess[botId] = true;
+			}
+		} finally {
+			tokenSaving[botId] = false;
 		}
 	};
 
@@ -179,6 +252,57 @@
 	{#if error}
 		<p class="mt-1 text-xs text-red-400">{error}</p>
 	{/if}
+{/snippet}
+
+{#snippet tokenMetadataSection(
+	botId: string,
+	auth: BotAuthStatusRecord,
+	form: BotTokenFormInput,
+	errors: {
+		accessToken?: string;
+		expiresAt?: string;
+		refreshToken?: string;
+		scopes?: string;
+	},
+	saving: boolean,
+	success: boolean,
+)}
+	<div class="mt-4 rounded-md border border-zinc-800 bg-zinc-950 p-4">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h4 class="text-xs font-medium text-zinc-400">Credential Metadata</h4>
+				<p class="mt-1 text-xs text-zinc-500">{getBotAuthStatusDetail(auth)}</p>
+			</div>
+			<span
+				class="rounded-full px-2 py-0.5 text-xs font-medium {getBotAuthStatusBadgeClass(auth)}"
+			>
+				{getBotAuthStatusLabel(auth)}
+			</span>
+		</div>
+
+		<div class="mt-4 grid gap-4 sm:grid-cols-2">
+			{@render textInput('Access Token', form.accessToken, (v) => (form.accessToken = v), errors.accessToken)}
+			{@render textInput('Refresh Token', form.refreshToken, (v) => (form.refreshToken = v), errors.refreshToken)}
+		</div>
+
+		<div class="mt-4 grid gap-4 sm:grid-cols-2">
+			{@render textInput('Expires At', form.expiresAt, (v) => (form.expiresAt = v), errors.expiresAt)}
+			{@render textareaInput('Scopes', form.scopes, (v) => (form.scopes = v), 3, errors.scopes, 'One scope per line.')}
+		</div>
+
+		<div class="mt-4 flex items-center gap-3">
+			<button
+				onclick={() => handleTokenSave(botId)}
+				disabled={saving}
+				class="rounded-md bg-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-600 disabled:opacity-50"
+			>
+				{saving ? 'Saving...' : 'Save Credentials'}
+			</button>
+			{#if success}
+				<span class="text-sm text-green-400">Credential metadata saved.</span>
+			{/if}
+		</div>
+	</div>
 {/snippet}
 
 {#snippet textInput(label: string, value: string, onInput: (v: string) => void, error?: string)}
@@ -418,9 +542,11 @@
 			</div>
 		{/snippet}
 
-		{#each await getBots() as bot (bot.id)}
+		{#each await getBotManagerData() as item (item.bot.id)}
+			{@const bot = item.bot}
 			{@const expanded = expandedBotId === bot.id}
 			{(initEditForm(bot), '')}
+			{(initTokenForm(bot.id, item.token), '')}
 
 			<div class="mb-3 rounded-lg border border-zinc-800 bg-zinc-900">
 				<button
@@ -444,6 +570,11 @@
 								: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20 ring-inset'}"
 						>
 							{bot.enabled ? 'Enabled' : 'Disabled'}
+						</span>
+						<span
+							class="rounded-full px-2 py-0.5 text-xs font-medium {getBotAuthStatusBadgeClass(item.auth)}"
+						>
+							Auth: {getBotAuthStatusLabel(item.auth)}
 						</span>
 					</div>
 					<svg
@@ -469,6 +600,14 @@
 							editSaving[bot.id] ?? false,
 							editSuccess[bot.id] ?? false,
 							() => handleUpdate(bot.id),
+						)}
+						{@render tokenMetadataSection(
+							bot.id,
+							item.auth,
+							tokenForms[bot.id]!,
+							tokenErrors[bot.id] ?? {},
+							tokenSaving[bot.id] ?? false,
+							tokenSuccess[bot.id] ?? false,
 						)}
 						{@render previewSection(bot.id)}
 					</div>

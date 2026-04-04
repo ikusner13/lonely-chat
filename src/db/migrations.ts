@@ -9,6 +9,7 @@ const createBotsMigrationId = 3;
 const createSessionMessagesMigrationId = 4;
 const createScenariosMigrationId = 5;
 const createBotMemoryMigrationId = 6;
+const createBotTokensMigrationId = 7;
 
 const createSettingsTable = Effect.gen(function* createSettingsTable() {
   const sql = yield* SqlClient.SqlClient;
@@ -119,6 +120,24 @@ const createBotMemoryTable = Effect.gen(function* createBotMemoryTable() {
   )`;
 });
 
+const createBotTokensTable = Effect.gen(function* createBotTokensTable() {
+  const sql = yield* SqlClient.SqlClient;
+
+  yield* sql`CREATE TABLE IF NOT EXISTS bot_tokens (
+    id TEXT PRIMARY KEY NOT NULL,
+    bot_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    scopes TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (bot_id, platform),
+    FOREIGN KEY (bot_id) REFERENCES bots(id)
+  )`;
+});
+
 const migrationEntries = [
   [createSettingsMigrationId, "create_settings", createSettingsTable],
   [createSessionsMigrationId, "create_sessions", createSessionsTable],
@@ -126,6 +145,7 @@ const migrationEntries = [
   [createSessionMessagesMigrationId, "create_session_messages", createSessionMessagesTable],
   [createScenariosMigrationId, "create_scenarios", createScenariosTable],
   [createBotMemoryMigrationId, "create_bot_memory", createBotMemoryTable],
+  [createBotTokensMigrationId, "create_bot_tokens", createBotTokensTable],
 ] as const;
 
 export const makeMigrationLoader = (): ReturnType<typeof SqliteMigrator.fromRecord> =>
