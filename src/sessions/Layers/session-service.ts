@@ -17,6 +17,7 @@ import { getBotMemorySourceMessages, makeBotMemoryRequest } from "../../ai/bot-m
 import { AiClient } from "../../ai/Services/ai-client";
 import type { AiGenerateResponse } from "../../ai/Services/ai-client";
 import { BotMemoryId, BotMemoryRecord } from "../../bots/bot-memory-record";
+import { BotId as PersistedBotId } from "../../bots/bot-record";
 import type { BotRecord } from "../../bots/bot-record";
 import { BotService } from "../../bots/Services/bot-service";
 import {
@@ -58,6 +59,7 @@ import {
   SessionId,
   SessionStartOptions,
 } from "../Services/session-service";
+import { AnalyticsBotSummary, AnalyticsOverview } from "../session-analytics";
 import { SessionMessageId, SessionMessageRecord } from "../session-message-record";
 import { SessionRecord } from "../session-record";
 import { SessionStartError } from "../session-start-error";
@@ -96,6 +98,23 @@ interface SessionRow {
   readonly total_cost_usd: number;
   readonly total_messages: number;
   readonly total_tokens_used: number;
+}
+
+interface AnalyticsOverviewRow {
+  readonly total_cost_usd: number | null;
+  readonly total_messages: number | null;
+  readonly total_sessions: number;
+  readonly total_tokens_used: number | null;
+}
+
+interface AnalyticsBotSummaryRow {
+  readonly bot_id: string;
+  readonly bot_name: string;
+  readonly display_name: string;
+  readonly message_count: number;
+  readonly platform: ChatMessage["platform"];
+  readonly session_count: number;
+  readonly total_tokens_used: number | null;
 }
 
 interface SettingRow {
@@ -243,6 +262,25 @@ const makeStoredSessionMessageRecord = (row: SessionMessageRow): SessionMessageR
     sessionId: SessionId.makeUnsafe(row.session_id),
     tokensUsed: row.tokens_used,
     username: ChatUsername.makeUnsafe(row.username),
+  });
+
+const makeAnalyticsOverview = (row: AnalyticsOverviewRow): AnalyticsOverview =>
+  new AnalyticsOverview({
+    totalCostUsd: row.total_cost_usd ?? 0,
+    totalMessages: row.total_messages ?? 0,
+    totalSessions: row.total_sessions,
+    totalTokensUsed: row.total_tokens_used ?? 0,
+  });
+
+const makeAnalyticsBotSummary = (row: AnalyticsBotSummaryRow): AnalyticsBotSummary =>
+  new AnalyticsBotSummary({
+    botId: PersistedBotId.makeUnsafe(row.bot_id),
+    botName: row.bot_name,
+    displayName: row.display_name,
+    messageCount: row.message_count,
+    platform: row.platform,
+    sessionCount: row.session_count,
+    totalTokensUsed: row.total_tokens_used ?? 0,
   });
 
 const serializeSessionMessage = (message: SessionMessageRecord) => ({
@@ -609,6 +647,68 @@ export const SessionServiceLive = Layer.effect(
             ORDER BY sent_at ASC, rowid ASC`;
 
           return rows.map(makeStoredSessionMessageRecord);
+        },
+      );
+
+      const getAnalyticsOverview = Effect.fn("SessionService.getAnalyticsOverview")(
+        function* getAnalyticsOverviewEffect() {
+          const rows = yield* sql<AnalyticsOverviewRow>`SELECT
+              COUNT(*) AS total_sessions,
+              COALESCE(SUM(total_messages), 0) AS total_messages,
+              COALESCE(SUM(total_tokens_used), 0) AS total_tokens_used,
+              COALESCE(SUM(total_cost_usd), 0) AS total_cost_usd
+            FROM sessions`;
+
+          return makeAnalyticsOverview(
+            rows[0] ?? {
+              total_cost_usd: 0,
+              total_messages: 0,
+              total_sessions: 0,
+              total_tokens_used: 0,
+            },
+          );
+        },
+      );
+
+      const getAnalyticsSessionHistory = Effect.fn("SessionService.getAnalyticsSessionHistory")(
+        function* getAnalyticsSessionHistoryEffect() {
+          const rows = yield* sql<SessionRow>`SELECT
+              id,
+              platform,
+              channel,
+              status,
+              started_at,
+              ended_at,
+              end_reason,
+              total_messages,
+              total_tokens_used,
+              total_cost_usd,
+              time_limit_seconds,
+              cost_limit_usd
+            FROM sessions
+            ORDER BY started_at DESC, rowid DESC`;
+
+          return rows.map(makeSessionRecord);
+        },
+      );
+
+      const getAnalyticsBotSummaries = Effect.fn("SessionService.getAnalyticsBotSummaries")(
+        function* getAnalyticsBotSummariesEffect() {
+          const rows = yield* sql<AnalyticsBotSummaryRow>`SELECT
+              bots.id AS bot_id,
+              bots.name AS bot_name,
+              bots.display_name AS display_name,
+              bots.platform AS platform,
+              COUNT(session_messages.id) AS message_count,
+              COUNT(DISTINCT session_messages.session_id) AS session_count,
+              COALESCE(SUM(session_messages.tokens_used), 0) AS total_tokens_used
+            FROM session_messages
+            INNER JOIN bots ON bots.id = session_messages.bot_id
+            WHERE session_messages.is_bot = ${1}
+            GROUP BY bots.id, bots.name, bots.display_name, bots.platform
+            ORDER BY message_count DESC, bots.display_name ASC, bots.name ASC`;
+
+          return rows.map(makeAnalyticsBotSummary);
         },
       );
 
@@ -1519,6 +1619,9 @@ export const SessionServiceLive = Layer.effect(
           exportSession,
           getActiveAlerts,
           getActiveSession,
+          getAnalyticsBotSummaries,
+          getAnalyticsOverview,
+          getAnalyticsSessionHistory,
           getSessionMessages,
           getMostRecentSession,
           liveAlerts: Stream.fromPubSub(liveAlertsPubSub),

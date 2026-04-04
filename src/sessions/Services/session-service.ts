@@ -3,6 +3,7 @@ import { Schema, ServiceMap } from "effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import type { ScenarioId } from "../../scenarios/scenario-record";
+import type { AnalyticsBotSummary, AnalyticsOverview } from "../session-analytics";
 import type { SessionMessageRecord } from "../session-message-record";
 import type { SessionRecord } from "../session-record";
 import type { SessionStartError } from "../session-start-error";
@@ -48,6 +49,9 @@ export interface SessionServiceShape {
     format: SessionExportFormat,
   ) => Effect.Effect<string | null, SqlError>;
   readonly getActiveAlerts: () => Effect.Effect<readonly SessionAlert[]>;
+  readonly getAnalyticsBotSummaries: () => Effect.Effect<readonly AnalyticsBotSummary[], SqlError>;
+  readonly getAnalyticsOverview: () => Effect.Effect<AnalyticsOverview, SqlError>;
+  readonly getAnalyticsSessionHistory: () => Effect.Effect<readonly SessionRecord[], SqlError>;
   readonly getActiveSession: () => Effect.Effect<SessionRecord | null, SqlError>;
   readonly getSessionMessages: (
     sessionId: SessionId,

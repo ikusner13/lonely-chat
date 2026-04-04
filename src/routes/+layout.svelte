@@ -11,6 +11,7 @@
 		{ href: '/chat', label: 'Chat Viewer' },
 		{ href: '/bots', label: 'Bot Manager' },
 		{ href: '/scenarios', label: 'Scenarios' },
+		{ href: '/analytics', label: 'Analytics' },
 	];
 
 	const isActive = (href: string) =>

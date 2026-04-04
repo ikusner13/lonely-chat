@@ -203,7 +203,7 @@ Use it with:
 
 ## Track 6: Analytics and Hardening Slices
 
-### [ ] VS-23: Analytics page with session and per-bot summaries
+### [x] VS-23: Analytics page with session and per-bot summaries
 
 - Depends on: `VS-05`, `VS-12`
 - Outcome: `/analytics` shows session history, per-bot message counts, and cost totals from persisted data.

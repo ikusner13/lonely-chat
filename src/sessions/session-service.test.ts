@@ -1021,6 +1021,147 @@ describe("session service", () => {
     }),
   );
 
+  it.effect("returns analytics overview, session history, and per-bot summaries", () =>
+    Effect.gen(function* returnsAnalyticsOverviewSessionHistoryAndPerBotSummaries() {
+      const dbPath = yield* createDatabasePath;
+      const pixelBot = makeStoredBot({
+        displayName: "Pixel",
+        id: PersistedBotId.makeUnsafe("bot-pixel"),
+        name: "pixel_bot",
+      });
+      const echoBot = makeStoredBot({
+        displayName: "Echo",
+        id: PersistedBotId.makeUnsafe("bot-echo"),
+        name: "echo_bot",
+      });
+
+      yield* insertStoredBot(dbPath, pixelBot);
+      yield* insertStoredBot(dbPath, echoBot);
+
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      const analytics = yield* Effect.gen(function* exerciseAnalyticsQueries() {
+        const sessionService = yield* SessionService;
+
+        yield* mockPlatformAdapter.platformAdapter.connect(makeBotConnection(pixelBot));
+        yield* mockPlatformAdapter.platformAdapter.connect(makeBotConnection(echoBot));
+
+        const firstSession = yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "hello analytics",
+          username: ChatUsername.makeUnsafe("viewer-analytics-1"),
+        });
+        yield* mockPlatformAdapter.platformAdapter.sendMessage(
+          makeBotConnection(pixelBot),
+          "pixel analytics reply",
+        );
+        expect(yield* waitForStoredSessionMessages(dbPath, 2)).toHaveLength(2);
+        yield* sessionService.recordCost(120, 0.75);
+        yield* sessionService.stopSession();
+
+        const secondSession = yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "another analytics line",
+          username: ChatUsername.makeUnsafe("viewer-analytics-2"),
+        });
+        yield* mockPlatformAdapter.platformAdapter.sendMessage(
+          makeBotConnection(pixelBot),
+          "pixel second reply",
+        );
+        yield* mockPlatformAdapter.platformAdapter.sendMessage(
+          makeBotConnection(echoBot),
+          "echo analytics reply",
+        );
+        expect(yield* waitForStoredSessionMessages(dbPath, 5)).toHaveLength(5);
+        yield* sessionService.recordCost(80, 0.5);
+        yield* sessionService.stopSession();
+
+        return {
+          botSummaries: yield* sessionService.getAnalyticsBotSummaries(),
+          overview: yield* sessionService.getAnalyticsOverview(),
+          sessionHistory: yield* sessionService.getAnalyticsSessionHistory(),
+          sessionStarts: [firstSession.startedAt, secondSession.startedAt] as const,
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(analytics.overview).toMatchObject({
+        totalCostUsd: 1.25,
+        totalMessages: 5,
+        totalSessions: 2,
+        totalTokensUsed: 200,
+      });
+      expect(
+        analytics.sessionHistory.map((session) => ({
+          channel: session.channel,
+          platform: session.platform,
+          startedAt: session.startedAt,
+          status: session.status,
+          totalCostUsd: session.totalCostUsd,
+          totalMessages: session.totalMessages,
+          totalTokensUsed: session.totalTokensUsed,
+        })),
+      ).toEqual([
+        {
+          channel: "lonely-chat",
+          platform: "mock",
+          startedAt: analytics.sessionStarts[1],
+          status: "ended",
+          totalCostUsd: 0.5,
+          totalMessages: 3,
+          totalTokensUsed: 80,
+        },
+        {
+          channel: "lonely-chat",
+          platform: "mock",
+          startedAt: analytics.sessionStarts[0],
+          status: "ended",
+          totalCostUsd: 0.75,
+          totalMessages: 2,
+          totalTokensUsed: 120,
+        },
+      ]);
+      expect(
+        analytics.botSummaries.map((summary) => ({
+          botId: summary.botId,
+          botName: summary.botName,
+          displayName: summary.displayName,
+          messageCount: summary.messageCount,
+          platform: summary.platform,
+          sessionCount: summary.sessionCount,
+          totalTokensUsed: summary.totalTokensUsed,
+        })),
+      ).toEqual([
+        {
+          botId: pixelBot.id,
+          botName: "pixel_bot",
+          displayName: "Pixel",
+          messageCount: 2,
+          platform: "twitch",
+          sessionCount: 2,
+          totalTokensUsed: 0,
+        },
+        {
+          botId: echoBot.id,
+          botName: "echo_bot",
+          displayName: "Echo",
+          messageCount: 1,
+          platform: "twitch",
+          sessionCount: 1,
+          totalTokensUsed: 0,
+        },
+      ]);
+    }),
+  );
+
   it.effect("responds once when one enabled bot is mentioned", () =>
     Effect.gen(function* respondsOnceWhenOneEnabledBotIsMentioned() {
       const dbPath = yield* createDatabasePath;
