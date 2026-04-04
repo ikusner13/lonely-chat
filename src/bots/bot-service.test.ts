@@ -453,6 +453,61 @@ describe("bot service", () => {
     }),
   );
 
+  it.effect("prefers the token matching the bot platform when multiple tokens exist", () =>
+    Effect.gen(function* prefersTheTokenMatchingTheBotPlatformWhenMultipleTokensExist() {
+      const dbPath = yield* createDatabasePath;
+      const botLayer = BotServiceLive.pipe(Layer.provide(makeDatabaseLayer(dbPath)));
+      const bot = makeTestBot();
+      const staleKickToken = makeTestToken(bot, {
+        accessToken: "kick-access-token",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+        id: BotTokenId.makeUnsafe("token-kick"),
+        platform: "kick",
+        refreshToken: "kick-refresh-token",
+        scopes: ["chat:write"],
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      });
+      const currentTwitchToken = makeTestToken(bot, {
+        accessToken: "twitch-access-token",
+        expiresAt: "2026-04-06T00:00:00.000Z",
+        id: BotTokenId.makeUnsafe("token-twitch"),
+        platform: "twitch",
+        refreshToken: "twitch-refresh-token",
+        scopes: ["chat:read", "chat:edit"],
+        updatedAt: "2026-04-03T00:00:02.000Z",
+      });
+
+      const resolved = yield* Effect.gen(function* exercisePlatformScopedTokenLookup() {
+        const botService = yield* BotService;
+
+        yield* botService.createBot(bot);
+        yield* botService.upsertBotToken(staleKickToken);
+        yield* botService.upsertBotToken(currentTwitchToken);
+
+        return {
+          authEntries: yield* botService.listBotsWithAuthStatus("2026-04-03T12:00:00.000Z"),
+          token: yield* botService.getBotToken(bot.id),
+        };
+      }).pipe(Effect.provide(botLayer));
+
+      expect(resolved.token).toEqual(currentTwitchToken);
+      expect(resolved.authEntries).toEqual([
+        {
+          auth: new BotAuthStatusRecord({
+            botId: bot.id,
+            expiresAt: "2026-04-06T00:00:00.000Z",
+            platform: "twitch",
+            scopes: ["chat:read", "chat:edit"],
+            status: "valid",
+            updatedAt: "2026-04-03T00:00:02.000Z",
+          }),
+          bot,
+          token: currentTwitchToken,
+        },
+      ]);
+    }),
+  );
+
   it.effect("lists valid, expired, and missing bot auth statuses", () =>
     Effect.gen(function* listsValidExpiredAndMissingBotAuthStatuses() {
       const dbPath = yield* createDatabasePath;

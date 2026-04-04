@@ -4,14 +4,16 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
-import { PlatformAdapter } from "../Services/platform-adapter";
 import type {
   BotConnection,
   ChannelName,
   ChatMessage,
   PlatformAdapterShape,
-  PlatformConnectionError,
   PlatformName,
+} from "../Services/platform-adapter";
+import {
+  PlatformAdapter,
+  PlatformConnectionError,
   PlatformSendError,
 } from "../Services/platform-adapter";
 
@@ -30,17 +32,17 @@ const messageBufferCapacity = 128;
 const makePlatformConnectionError = (
   platform: PlatformName,
   botId: BotConnection["botId"],
-): PlatformConnectionError => ({
-  _tag: "PlatformConnectionError",
-  botId,
-  platform,
-});
+): PlatformConnectionError =>
+  new PlatformConnectionError({
+    botId,
+    platform,
+  });
 
-const makePlatformSendError = (channel: ChannelName): PlatformSendError => ({
-  _tag: "PlatformSendError",
-  channel,
-  platform: mockPlatform,
-});
+const makePlatformSendError = (channel: ChannelName): PlatformSendError =>
+  new PlatformSendError({
+    channel,
+    platform: mockPlatform,
+  });
 
 export const makeMockPlatformAdapter = Effect.gen(function* makeMockPlatformAdapter() {
   const connectionsRef = yield* Ref.make<readonly BotConnection[]>([]);
@@ -69,7 +71,7 @@ export const makeMockPlatformAdapter = Effect.gen(function* makeMockPlatformAdap
       return;
     }
 
-    yield* Ref.set(connectionsRef, [...connections, bot]);
+    yield* Ref.update(connectionsRef, (existingConnections) => [...existingConnections, bot]);
   });
 
   const disconnect = Effect.fn("PlatformAdapter.disconnect")(function* disconnectMockBot(
@@ -115,9 +117,7 @@ export const makeMockPlatformAdapter = Effect.gen(function* makeMockPlatformAdap
       username: connectedBot.username,
     };
 
-    const sentMessages = yield* Ref.get(sentMessagesRef);
-
-    yield* Ref.set(sentMessagesRef, [...sentMessages, message]);
+    yield* Ref.update(sentMessagesRef, (sentMessages) => [...sentMessages, message]);
     yield* PubSub.publish(messagesPubSub, message);
   });
 

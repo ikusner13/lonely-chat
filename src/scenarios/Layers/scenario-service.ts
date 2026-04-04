@@ -3,6 +3,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { BotId } from "../../bots/bot-record";
 import {
   ScenarioId,
   ScenarioRecord,
@@ -12,11 +13,15 @@ import {
 import { ScenarioService } from "../Services/scenario-service";
 import type { ScenarioServiceShape } from "../Services/scenario-service";
 
-const decodeBotIdArray = Schema.decodeUnknownSync(
-  Schema.Array(Schema.String.pipe(Schema.brand("BotId"))),
+const decodeBotIdArrayFromJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(BotId)),
 );
-const decodeScenarioSteps = Schema.decodeUnknownSync(Schema.Array(ScenarioStep));
-const decodeTriggerConfig = Schema.decodeUnknownSync(ScenarioTriggerConfig);
+const decodeScenarioStepsFromJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(ScenarioStep)),
+);
+const decodeTriggerConfigFromJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(ScenarioTriggerConfig),
+);
 
 interface ScenarioRow {
   readonly created_at: string;
@@ -41,10 +46,10 @@ const makeScenarioRecord = (row: ScenarioRow): ScenarioRecord =>
     enabled: row.enabled === 1,
     id: ScenarioId.makeUnsafe(row.id),
     name: row.name,
-    participants: decodeBotIdArray(JSON.parse(row.participants) as unknown),
-    steps: decodeScenarioSteps(JSON.parse(row.steps) as unknown),
+    participants: decodeBotIdArrayFromJson(row.participants),
+    steps: decodeScenarioStepsFromJson(row.steps),
     topic: row.topic,
-    triggerConfig: decodeTriggerConfig(JSON.parse(row.trigger_config) as unknown),
+    triggerConfig: decodeTriggerConfigFromJson(row.trigger_config),
     triggerType: row.trigger_type,
     updatedAt: row.updated_at,
   });

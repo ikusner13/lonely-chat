@@ -32,19 +32,23 @@ export interface ChatMessage {
   readonly botId?: BotId;
 }
 
-export interface PlatformConnectionError {
-  readonly _tag: "PlatformConnectionError";
-  readonly platform: PlatformName;
-  readonly botId: BotId;
-  readonly cause?: unknown;
-}
+export class PlatformConnectionError extends Schema.TaggedErrorClass<PlatformConnectionError>()(
+  "PlatformConnectionError",
+  {
+    botId: BotId,
+    cause: Schema.optional(Schema.Defect),
+    platform: PlatformName,
+  },
+) {}
 
-export interface PlatformSendError {
-  readonly _tag: "PlatformSendError";
-  readonly platform: PlatformName;
-  readonly channel: ChannelName;
-  readonly cause?: unknown;
-}
+export class PlatformSendError extends Schema.TaggedErrorClass<PlatformSendError>()(
+  "PlatformSendError",
+  {
+    cause: Schema.optional(Schema.Defect),
+    channel: ChannelName,
+    platform: PlatformName,
+  },
+) {}
 
 export interface PlatformAdapterShape {
   readonly connect: (bot: BotConnection) => Effect.Effect<void, PlatformConnectionError>;

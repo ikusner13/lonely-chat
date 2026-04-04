@@ -10,7 +10,9 @@ import { SessionId } from "../../sessions/Services/session-service";
 import { BotService } from "../Services/bot-service";
 import type { BotServiceShape } from "../Services/bot-service";
 
-const decodeStringArray = Schema.decodeUnknownSync(Schema.Array(Schema.String));
+const decodeStringArrayFromJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
 
 interface BotRow {
   readonly created_at: string;
@@ -56,8 +58,7 @@ interface BotTokenRow {
   readonly updated_at: string;
 }
 
-const parseStringArray = (value: string): readonly string[] =>
-  decodeStringArray(JSON.parse(value) as unknown);
+const parseStringArray = (value: string): readonly string[] => decodeStringArrayFromJson(value);
 
 const makeBotRecord = (row: BotRow): BotRecord =>
   new BotRecord({
@@ -228,17 +229,27 @@ export const BotServiceLive = Layer.effect(
       botId: BotId,
     ) {
       const rows = yield* sql<BotTokenRow>`SELECT
-          id,
-          bot_id,
-          platform,
-          access_token,
-          refresh_token,
-          scopes,
-          expires_at,
-          created_at,
-          updated_at
+          bot_tokens.id,
+          bot_tokens.bot_id,
+          bot_tokens.platform,
+          bot_tokens.access_token,
+          bot_tokens.refresh_token,
+          bot_tokens.scopes,
+          bot_tokens.expires_at,
+          bot_tokens.created_at,
+          bot_tokens.updated_at
         FROM bot_tokens
-        WHERE bot_id = ${botId}
+        LEFT JOIN bots ON bots.id = bot_tokens.bot_id
+        WHERE bot_tokens.bot_id = ${botId}
+        ORDER BY
+          CASE
+            WHEN bots.platform IS NULL THEN 1
+            WHEN bot_tokens.platform = bots.platform THEN 0
+            ELSE 1
+          END ASC,
+          bot_tokens.updated_at DESC,
+          bot_tokens.created_at DESC,
+          bot_tokens.rowid DESC
         LIMIT 1`;
 
       const [token] = rows;

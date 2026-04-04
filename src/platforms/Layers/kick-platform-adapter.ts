@@ -16,10 +16,12 @@ import type {
   ChannelName,
   ChatMessage,
   PlatformAdapterShape,
+} from "../Services/platform-adapter";
+import {
+  ChatUsername,
   PlatformConnectionError,
   PlatformSendError,
 } from "../Services/platform-adapter";
-import { ChatUsername } from "../Services/platform-adapter";
 import { KickPlatformAdapter, KickPlatformError } from "../Services/kick-platform-adapter";
 import type {
   KickAuthorizationCallbackRequest,
@@ -609,19 +611,19 @@ interface ChannelSubscription {
 const makePlatformConnectionError = (
   bot: BotConnection,
   cause?: unknown,
-): PlatformConnectionError => ({
-  _tag: "PlatformConnectionError",
-  botId: bot.botId,
-  cause,
-  platform: bot.platform,
-});
+): PlatformConnectionError =>
+  new PlatformConnectionError({
+    botId: bot.botId,
+    cause,
+    platform: bot.platform,
+  });
 
-const makePlatformSendError = (bot: BotConnection, cause?: unknown): PlatformSendError => ({
-  _tag: "PlatformSendError",
-  cause,
-  channel: bot.channel,
-  platform: bot.platform,
-});
+const makePlatformSendError = (bot: BotConnection, cause?: unknown): PlatformSendError =>
+  new PlatformSendError({
+    cause,
+    channel: bot.channel,
+    platform: bot.platform,
+  });
 
 export const makeKickSessionPlatformAdapter = (
   dependencies: KickAdapterServiceDependencies,

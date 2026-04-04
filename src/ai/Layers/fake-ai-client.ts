@@ -87,9 +87,7 @@ export const makeFakeAiClient = Effect.gen(function* makeFakeAiClient() {
   const generateText = Effect.fn("AiClient.generateText")(function* generateFakeClientText(
     request: AiGenerateRequest,
   ) {
-    const requests = yield* Ref.get(requestsRef);
-
-    yield* Ref.set(requestsRef, [...requests, request]);
+    yield* Ref.update(requestsRef, (requests) => [...requests, request]);
 
     const response = yield* Effect.try({
       catch: (cause) =>

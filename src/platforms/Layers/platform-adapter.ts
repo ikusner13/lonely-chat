@@ -13,10 +13,9 @@ import {
   makeLiveDependencies as makeTwitchLiveDependencies,
   makeTwitchSessionPlatformAdapter,
 } from "./twitch-platform-adapter";
-import { PlatformAdapter } from "../Services/platform-adapter";
-import type {
-  BotConnection,
-  PlatformAdapterShape,
+import type { BotConnection, PlatformAdapterShape } from "../Services/platform-adapter";
+import {
+  PlatformAdapter,
   PlatformConnectionError,
   PlatformSendError,
 } from "../Services/platform-adapter";
@@ -83,19 +82,19 @@ const readConfiguredKickPlatform = (): KickPlatformConfigShape | null => {
 const makeUnsupportedConnectionError = (
   bot: BotConnection,
   cause?: unknown,
-): PlatformConnectionError => ({
-  _tag: "PlatformConnectionError",
-  botId: bot.botId,
-  cause,
-  platform: bot.platform,
-});
+): PlatformConnectionError =>
+  new PlatformConnectionError({
+    botId: bot.botId,
+    cause,
+    platform: bot.platform,
+  });
 
-const makeUnsupportedSendError = (bot: BotConnection, cause?: unknown): PlatformSendError => ({
-  _tag: "PlatformSendError",
-  cause,
-  channel: bot.channel,
-  platform: bot.platform,
-});
+const makeUnsupportedSendError = (bot: BotConnection, cause?: unknown): PlatformSendError =>
+  new PlatformSendError({
+    cause,
+    channel: bot.channel,
+    platform: bot.platform,
+  });
 
 const makeHybridPlatformAdapter = ({
   kickPlatformAdapter,

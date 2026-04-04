@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -29,6 +30,8 @@ import {
   ChannelName,
   ChatUsername,
   PlatformAdapter,
+  PlatformConnectionError,
+  PlatformSendError,
 } from "../platforms/Services/platform-adapter";
 import { ScenarioServiceLive } from "../scenarios/Layers/scenario-service";
 import {
@@ -339,6 +342,40 @@ const makeStoredBotToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>)
     ...overrides,
   });
 
+const insertStoredBotToken = (
+  dbPath: string,
+  token: BotTokenRecord,
+): Effect.Effect<void, unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* insertStoredBotTokenRow() {
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`INSERT INTO bot_tokens (
+          id,
+          bot_id,
+          platform,
+          access_token,
+          refresh_token,
+          scopes,
+          expires_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${token.id},
+          ${token.botId},
+          ${token.platform},
+          ${token.accessToken},
+          ${token.refreshToken},
+          ${JSON.stringify(token.scopes)},
+          ${token.expiresAt},
+          ${token.createdAt},
+          ${token.updatedAt}
+        )`;
+    }),
+  );
+
 class FakeTwitchListenerHandle {
   private readonly onUnbind: () => void;
 
@@ -391,6 +428,13 @@ class FakeTwitchSessionChatClient {
 
   async say(channel: string, text: string): Promise<void> {
     this.sentMessages.push({ channel, text });
+  }
+}
+
+class RejectingTwitchSessionChatClient extends FakeTwitchSessionChatClient {
+  override async join(channel: string): Promise<void> {
+    await super.join(channel);
+    throw new Error("Twitch join failed.");
   }
 }
 
@@ -819,6 +863,40 @@ describe("session service", () => {
     }),
   );
 
+  it.effect("rolls back session startup when connecting a live bot fails", () =>
+    Effect.gen(function* rollsBackSessionStartupWhenConnectingALiveBotFails() {
+      const dbPath = yield* createDatabasePath;
+      const twitchBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-twitch-fail"),
+        name: "pixel_bot",
+        platform: "twitch",
+      });
+      const failingTwitchChatClient = new RejectingTwitchSessionChatClient();
+      const sessionLayer = makeTwitchSessionTestLayer(dbPath, failingTwitchChatClient);
+
+      yield* insertStoredBot(dbPath, twitchBot);
+      yield* insertChannelSetting(dbPath, "#Lonely_Channel");
+
+      const startupResult = yield* Effect.gen(function* exerciseFailedStartup() {
+        const botService = yield* BotService;
+        const sessionService = yield* SessionService;
+
+        yield* botService.upsertBotToken(makeStoredBotToken(twitchBot));
+
+        const exit = yield* sessionService.startSession().pipe(Effect.exit);
+
+        return {
+          activeSession: yield* sessionService.getActiveSession(),
+          exit,
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(Exit.isFailure(startupResult.exit)).toBe(true);
+      expect(startupResult.activeSession).toBeNull();
+      expect(yield* loadStoredSessions(dbPath)).toEqual([]);
+    }),
+  );
+
   it.effect("starts a Kick session and persists live chat from the configured channel", () =>
     Effect.gen(function* startsAKickSessionAndPersistsLiveChatFromTheConfiguredChannel() {
       const dbPath = yield* createDatabasePath;
@@ -1086,11 +1164,12 @@ describe("session service", () => {
             Effect.suspend(() => {
               if (shouldFailNextConnect) {
                 shouldFailNextConnect = false;
-                return Effect.fail({
-                  _tag: "PlatformConnectionError" as const,
-                  botId: connection.botId,
-                  platform: connection.platform,
-                });
+                return Effect.fail(
+                  new PlatformConnectionError({
+                    botId: connection.botId,
+                    platform: connection.platform,
+                  }),
+                );
               }
 
               return mockPlatformAdapter.platformAdapter.connect(connection);
@@ -1129,6 +1208,230 @@ describe("session service", () => {
 
       expect(runtimeState.signals.some((signal) => signal.type === "reconnect_attempt")).toBe(true);
       expect(runtimeState.statuses[0]?.state).toBe("online");
+    }),
+  );
+
+  it.effect("reconnects on the next response after a send failure marks a bot offline", () =>
+    Effect.gen(function* reconnectsOnTheNextResponseAfterASendFailureMarksABotOffline() {
+      const dbPath = yield* createDatabasePath;
+      const bot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-send-retry"),
+        name: "pixel",
+        talkativeness: 0,
+      });
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      let connectAttemptCount = 0;
+      let shouldFailNextSend = true;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of({
+          connect: Effect.fn("PlatformAdapter.connect")((connection) =>
+            Effect.gen(function* connectTrackedBotEffect() {
+              connectAttemptCount += 1;
+              yield* mockPlatformAdapter.platformAdapter.connect(connection);
+            }),
+          ),
+          disconnect: mockPlatformAdapter.platformAdapter.disconnect,
+          listenChat: mockPlatformAdapter.platformAdapter.listenChat,
+          sendMessage: Effect.fn("PlatformAdapter.sendMessage")((connection, text) =>
+            Effect.suspend(() => {
+              if (shouldFailNextSend) {
+                shouldFailNextSend = false;
+                return Effect.fail(
+                  new PlatformSendError({
+                    channel: connection.channel,
+                    platform: connection.platform,
+                  }),
+                );
+              }
+
+              return mockPlatformAdapter.platformAdapter.sendMessage(connection, text);
+            }),
+          ),
+        }),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      yield* insertStoredBot(dbPath, bot);
+
+      const runtimeState = yield* Effect.gen(function* exerciseSendFailureRecovery() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "@pixel first try",
+          username: ChatUsername.makeUnsafe("viewer-first"),
+        });
+        yield* TestClock.adjust("4 seconds");
+
+        yield* waitForEffectPredicate(
+          sessionService.getBotRuntimeStatuses(),
+          (statuses) => statuses[0]?.state === "offline",
+        );
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "@pixel second try",
+          username: ChatUsername.makeUnsafe("viewer-second"),
+        });
+        yield* TestClock.adjust("4 seconds");
+
+        return {
+          sentMessages: yield* waitForEffectPredicate(
+            mockPlatformAdapter.getSentMessages,
+            (messages) => messages.length === 1,
+          ),
+          signals: yield* waitForEffectPredicate(sessionService.getBotRuntimeSignals(), (signals) =>
+            signals.some((signal) => signal.type === "recovered"),
+          ),
+          statuses: yield* waitForEffectPredicate(
+            sessionService.getBotRuntimeStatuses(),
+            (statuses) => statuses[0]?.state === "online",
+          ),
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(connectAttemptCount).toBe(2);
+      expect(runtimeState.sentMessages).toHaveLength(1);
+      expect(runtimeState.signals.some((signal) => signal.type === "offline")).toBe(true);
+      expect(runtimeState.signals.some((signal) => signal.type === "recovered")).toBe(true);
+      expect(runtimeState.statuses[0]?.state).toBe("online");
+    }),
+  );
+
+  it.effect("rolls back session startup when the configured live connection fails", () =>
+    Effect.gen(function* rollsBackSessionStartupWhenTheConfiguredLiveConnectionFails() {
+      const dbPath = yield* createDatabasePath;
+      const liveBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-live-start-failure"),
+        name: "livepixel",
+        platform: "twitch",
+      });
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of({
+          connect: Effect.fn("PlatformAdapter.connect")((connection) =>
+            Effect.fail(
+              new PlatformConnectionError({
+                botId: connection.botId,
+                platform: connection.platform,
+              }),
+            ),
+          ),
+          disconnect: Effect.fn("PlatformAdapter.disconnect")(() => Effect.void),
+          listenChat: () => Stream.empty,
+          sendMessage: Effect.fn("PlatformAdapter.sendMessage")(() => Effect.void),
+        }),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      yield* insertStoredBot(dbPath, liveBot);
+
+      const runtimeState = yield* Effect.gen(function* exerciseFailedStartupRollback() {
+        const botService = yield* BotService;
+        const sessionService = yield* SessionService;
+
+        yield* botService.upsertBotToken(makeStoredBotToken(liveBot));
+
+        const startExit = yield* Effect.exit(sessionService.startSession());
+
+        return {
+          currentSession: yield* sessionService.getActiveSession(),
+          startExit,
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(Exit.isFailure(runtimeState.startExit)).toBe(true);
+      expect(runtimeState.currentSession).toBeNull();
+      expect(yield* loadStoredSessions(dbPath)).toEqual([]);
+    }),
+  );
+
+  it.effect("rolls back session startup when a live connection fails mid-bootstrap", () =>
+    Effect.gen(function* rollsBackSessionStartupWhenALiveConnectionFailsMidBootstrap() {
+      const dbPath = yield* createDatabasePath;
+      const firstBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-live-1"),
+        name: "pixel",
+        platform: "twitch",
+        talkativeness: 0,
+      });
+      const secondBot = makeStoredBot({
+        createdAt: "2026-04-03T00:00:01.000Z",
+        displayName: "Echo",
+        id: PersistedBotId.makeUnsafe("bot-live-2"),
+        name: "echo",
+        platform: "twitch",
+        talkativeness: 0,
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      });
+
+      yield* insertStoredBot(dbPath, firstBot);
+      yield* insertStoredBot(dbPath, secondBot);
+      yield* insertStoredBotToken(dbPath, makeStoredBotToken(firstBot));
+      yield* insertStoredBotToken(
+        dbPath,
+        makeStoredBotToken(secondBot, {
+          accessToken: "twitch-access-token-2",
+          id: BotTokenId.makeUnsafe("token-live-2"),
+          refreshToken: "twitch-refresh-token-2",
+          updatedAt: "2026-04-03T00:00:01.000Z",
+        }),
+      );
+
+      let connectAttemptCount = 0;
+      const disconnectedBots: BotConnection[] = [];
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of({
+          connect: Effect.fn("PlatformAdapter.connect")((connection) =>
+            Effect.suspend(() => {
+              connectAttemptCount += 1;
+
+              return connectAttemptCount === 2
+                ? Effect.fail(
+                    new PlatformConnectionError({
+                      botId: connection.botId,
+                      platform: connection.platform,
+                    }),
+                  )
+                : Effect.void;
+            }),
+          ),
+          disconnect: Effect.fn("PlatformAdapter.disconnect")((connection) =>
+            Effect.sync(() => {
+              disconnectedBots.push(connection);
+            }),
+          ),
+          listenChat: () => Stream.empty,
+          sendMessage: Effect.fn("PlatformAdapter.sendMessage")(() => Effect.void),
+        }),
+      );
+      const sessionLayer = makeSessionTestLayer(dbPath, platformLayer);
+
+      const startupState = yield* Effect.gen(function* exerciseFailedStartupRollback() {
+        const sessionService = yield* SessionService;
+        const startExit = yield* Effect.exit(sessionService.startSession());
+
+        return {
+          activeSession: yield* sessionService.getActiveSession(),
+          startExit,
+        };
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(Exit.isFailure(startupState.startExit)).toBe(true);
+      expect(startupState.activeSession).toBeNull();
+      expect(connectAttemptCount).toBe(2);
+      expect(disconnectedBots).toEqual([
+        {
+          botId: BotId.makeUnsafe(firstBot.id),
+          channel: ChannelName.makeUnsafe("lonely-chat"),
+          platform: "twitch",
+          username: ChatUsername.makeUnsafe(firstBot.name),
+        },
+      ]);
+      expect(yield* loadStoredSessions(dbPath)).toEqual([]);
     }),
   );
 
