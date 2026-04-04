@@ -73,12 +73,40 @@ const makeStoredToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>): B
     id: BotTokenId.makeUnsafe(`token-${bot.id}`),
     platform: bot.platform,
     refreshToken: "kick-refresh-token-1",
-    scopes: ["chat:write"],
+    scopes: ["chat:write", "events:subscribe"],
     updatedAt: createdAt,
     ...overrides,
   });
 
 interface KickTestLayerOptions {
+  readonly buildSessionClient?: (args: {
+    readonly accessToken: string;
+    readonly channel: string;
+  }) => {
+    readonly connect: () => Promise<void>;
+    readonly disconnect: () => Promise<void>;
+    readonly onMessage: (
+      listener: (message: {
+        readonly channel: string;
+        readonly text: string;
+        readonly username: string;
+      }) => void,
+    ) => {
+      readonly unsubscribe: () => void;
+    };
+    readonly sendMessage: (text: string) => Promise<void>;
+  };
+  readonly createEventSubscriptions?: (request: {
+    readonly accessToken: string;
+    readonly events: readonly {
+      readonly name: string;
+      readonly version: number;
+    }[];
+  }) => Promise<readonly string[]>;
+  readonly deleteEventSubscriptions?: (request: {
+    readonly accessToken: string;
+    readonly subscriptionIds: readonly string[];
+  }) => Promise<void>;
   readonly exchangeAuthorizationCode?: (args: {
     readonly clientId: string;
     readonly clientSecret: string;
@@ -118,20 +146,33 @@ const makeKickTestLayer = (dbPath: string, options: KickTestLayerOptions = {}) =
 
       return KickPlatformAdapter.of(
         yield* makeKickPlatformAdapter({
+          buildSessionClient:
+            options.buildSessionClient ??
+            (() => ({
+              connect: async () => undefined,
+              disconnect: async () => undefined,
+              onMessage: () => ({
+                unsubscribe: () => undefined,
+              }),
+              sendMessage: async () => undefined,
+            })),
           botService,
           config: {
             clientId: "kick-client-id",
             clientSecret: Redacted.make("kick-client-secret"),
             redirectUri,
-            scopes: ["chat:write"],
+            scopes: ["chat:write", "events:subscribe"],
           },
+          createEventSubscriptions:
+            options.createEventSubscriptions ?? (async () => ["kick-subscription-1"]),
+          deleteEventSubscriptions: options.deleteEventSubscriptions ?? (async () => undefined),
           exchangeAuthorizationCode:
             options.exchangeAuthorizationCode ??
             (async () => ({
               accessToken: "kick-oauth-access-token",
               expiresAt: "2026-04-03T02:00:00.000Z",
               refreshToken: "kick-oauth-refresh-token",
-              scopes: ["chat:write"],
+              scopes: ["chat:write", "events:subscribe"],
             })),
           now: options.now ?? (() => createdAt),
           postChatMessage: options.postChatMessage ?? (async () => undefined),
@@ -141,7 +182,7 @@ const makeKickTestLayer = (dbPath: string, options: KickTestLayerOptions = {}) =
               accessToken: "kick-refreshed-access-token",
               expiresAt: "2026-04-03T01:05:00.000Z",
               refreshToken: "kick-refreshed-refresh-token",
-              scopes: ["chat:write"],
+              scopes: ["chat:write", "events:subscribe"],
             })),
         }),
       );
@@ -179,7 +220,7 @@ describe("kick platform adapter", () => {
       expect(parsedUrl.searchParams.get("client_id")).toBe("kick-client-id");
       expect(parsedUrl.searchParams.get("redirect_uri")).toBe(redirectUri);
       expect(parsedUrl.searchParams.get("response_type")).toBe("code");
-      expect(parsedUrl.searchParams.get("scope")).toBe("chat:write");
+      expect(parsedUrl.searchParams.get("scope")).toBe("chat:write events:subscribe");
       expect(parsedUrl.searchParams.get("code_challenge")).toBe("code-challenge-123");
       expect(parsedUrl.searchParams.get("code_challenge_method")).toBe("S256");
       expect(parsedUrl.searchParams.get("state")).toBe("oauth-state-123");
@@ -198,7 +239,7 @@ describe("kick platform adapter", () => {
             accessToken: "kick-oauth-access-token",
             expiresAt: "2026-04-03T02:00:00.000Z",
             refreshToken: "kick-oauth-refresh-token",
-            scopes: ["chat:write"],
+            scopes: ["chat:write", "events:subscribe"],
           };
         },
         now: () => createdAt,
@@ -235,7 +276,7 @@ describe("kick platform adapter", () => {
           id: BotTokenId.makeUnsafe(`token-${bot.id}`),
           platform: "kick",
           refreshToken: "kick-oauth-refresh-token",
-          scopes: ["chat:write"],
+          scopes: ["chat:write", "events:subscribe"],
           updatedAt: createdAt,
         }),
       );
@@ -260,7 +301,7 @@ describe("kick platform adapter", () => {
             accessToken: "kick-refreshed-access-token",
             expiresAt: "2026-04-03T01:05:00.000Z",
             refreshToken: "kick-refreshed-refresh-token",
-            scopes: ["chat:write"],
+            scopes: ["chat:write", "events:subscribe"],
           };
         },
       });

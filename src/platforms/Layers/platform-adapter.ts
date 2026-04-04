@@ -4,8 +4,15 @@ import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 
 import { BotService } from "../../bots/Services/bot-service";
+import {
+  makeKickSessionPlatformAdapter,
+  makeLiveDependencies as makeKickLiveDependencies,
+} from "./kick-platform-adapter";
 import { makeMockPlatformAdapter } from "./mock-platform-adapter";
-import { makeLiveDependencies, makeTwitchSessionPlatformAdapter } from "./twitch-platform-adapter";
+import {
+  makeLiveDependencies as makeTwitchLiveDependencies,
+  makeTwitchSessionPlatformAdapter,
+} from "./twitch-platform-adapter";
 import { PlatformAdapter } from "../Services/platform-adapter";
 import type {
   BotConnection,
@@ -13,10 +20,14 @@ import type {
   PlatformConnectionError,
   PlatformSendError,
 } from "../Services/platform-adapter";
+import type { KickAdapterDependencies } from "./kick-platform-adapter";
+import type { KickPlatformConfigShape } from "../Services/kick-platform-config";
 import type { TwitchAdapterDependencies } from "./twitch-platform-adapter";
 import type { TwitchPlatformConfigShape } from "../Services/twitch-platform-config";
 
 interface PlatformAdapterLayerOptions {
+  readonly kickDependencies?: Partial<KickAdapterDependencies>;
+  readonly kickConfig?: KickPlatformConfigShape | null;
   readonly twitchDependencies?: Partial<TwitchAdapterDependencies>;
   readonly twitchConfig?: TwitchPlatformConfigShape | null;
 }
@@ -45,6 +56,30 @@ const readConfiguredTwitchPlatform = (): TwitchPlatformConfigShape | null => {
   };
 };
 
+const readConfiguredKickPlatform = (): KickPlatformConfigShape | null => {
+  const clientId = process.env["KICK_CLIENT_ID"]?.trim();
+  const clientSecret = process.env["KICK_CLIENT_SECRET"]?.trim();
+  const redirectUri = process.env["KICK_REDIRECT_URI"]?.trim();
+
+  if (
+    clientId === undefined ||
+    clientId.length === 0 ||
+    clientSecret === undefined ||
+    clientSecret.length === 0 ||
+    redirectUri === undefined ||
+    redirectUri.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    clientId,
+    clientSecret: Redacted.make(clientSecret),
+    redirectUri,
+    scopes: ["chat:write", "events:subscribe"],
+  };
+};
+
 const makeUnsupportedConnectionError = (
   bot: BotConnection,
   cause?: unknown,
@@ -63,9 +98,11 @@ const makeUnsupportedSendError = (bot: BotConnection, cause?: unknown): Platform
 });
 
 const makeHybridPlatformAdapter = ({
+  kickPlatformAdapter,
   mockPlatformAdapter,
   twitchPlatformAdapter,
 }: {
+  readonly kickPlatformAdapter: PlatformAdapterShape | null;
   readonly mockPlatformAdapter: PlatformAdapterShape;
   readonly twitchPlatformAdapter: PlatformAdapterShape | null;
 }): PlatformAdapterShape => {
@@ -87,12 +124,16 @@ const makeHybridPlatformAdapter = ({
         return twitchPlatformAdapter.connect(bot);
       }
       case "kick": {
-        return Effect.fail(
-          makeUnsupportedConnectionError(
-            bot,
-            new Error("Kick platform adapter is not configured."),
-          ),
-        );
+        if (kickPlatformAdapter === null) {
+          return Effect.fail(
+            makeUnsupportedConnectionError(
+              bot,
+              new Error("Kick platform adapter is not configured."),
+            ),
+          );
+        }
+
+        return kickPlatformAdapter.connect(bot);
       }
       default: {
         return Effect.fail(
@@ -114,7 +155,7 @@ const makeHybridPlatformAdapter = ({
         return twitchPlatformAdapter?.disconnect(bot) ?? Effect.void;
       }
       case "kick": {
-        return Effect.void;
+        return kickPlatformAdapter?.disconnect(bot) ?? Effect.void;
       }
       default: {
         return Effect.void;
@@ -137,9 +178,13 @@ const makeHybridPlatformAdapter = ({
         return twitchPlatformAdapter.sendMessage(bot, text);
       }
       case "kick": {
-        return Effect.fail(
-          makeUnsupportedSendError(bot, new Error("Kick platform adapter is not configured.")),
-        );
+        if (kickPlatformAdapter === null) {
+          return Effect.fail(
+            makeUnsupportedSendError(bot, new Error("Kick platform adapter is not configured.")),
+          );
+        }
+
+        return kickPlatformAdapter.sendMessage(bot, text);
       }
       default: {
         return Effect.fail(
@@ -149,13 +194,19 @@ const makeHybridPlatformAdapter = ({
     }
   };
 
-  const listenChat = (channel: BotConnection["channel"]) =>
-    twitchPlatformAdapter === null
-      ? mockPlatformAdapter.listenChat(channel)
-      : Stream.merge(
-          mockPlatformAdapter.listenChat(channel),
-          twitchPlatformAdapter.listenChat(channel),
-        );
+  const livePlatformAdapters = [twitchPlatformAdapter, kickPlatformAdapter].filter(
+    (platformAdapter): platformAdapter is PlatformAdapterShape => platformAdapter !== null,
+  );
+
+  const listenChat = (channel: BotConnection["channel"]) => {
+    let stream = mockPlatformAdapter.listenChat(channel);
+
+    for (const platformAdapter of livePlatformAdapters) {
+      stream = Stream.merge(stream, platformAdapter.listenChat(channel));
+    }
+
+    return stream;
+  };
 
   return {
     connect,
@@ -173,12 +224,22 @@ export const makePlatformAdapterLayer = (
     Effect.gen(function* makePlatformAdapterLayerEffect() {
       const botService = yield* BotService;
       const { platformAdapter: mockPlatformAdapter } = yield* makeMockPlatformAdapter;
+      const kickConfig = options.kickConfig ?? readConfiguredKickPlatform();
       const twitchConfig = options.twitchConfig ?? readConfiguredTwitchPlatform();
+      const kickPlatformAdapter =
+        kickConfig === null
+          ? null
+          : yield* makeKickSessionPlatformAdapter({
+              ...makeKickLiveDependencies(kickConfig),
+              ...options.kickDependencies,
+              botService,
+              config: options.kickDependencies?.config ?? options.kickConfig ?? kickConfig,
+            });
       const twitchPlatformAdapter =
         twitchConfig === null
           ? null
           : yield* makeTwitchSessionPlatformAdapter({
-              ...makeLiveDependencies(twitchConfig),
+              ...makeTwitchLiveDependencies(twitchConfig),
               ...options.twitchDependencies,
               botService,
               config: options.twitchDependencies?.config ?? options.twitchConfig ?? twitchConfig,
@@ -186,6 +247,7 @@ export const makePlatformAdapterLayer = (
 
       return PlatformAdapter.of(
         makeHybridPlatformAdapter({
+          kickPlatformAdapter,
           mockPlatformAdapter,
           twitchPlatformAdapter,
         }),

@@ -194,7 +194,7 @@ Use it with:
 - Spec inputs: `specs/platforms.md`, `specs/technical-effect.md`
 - Verify: auth/send adapter tests, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-22: Kick live listener and session control
+### [x] VS-22: Kick live listener and session control
 
 - Depends on: `VS-21`, `VS-05`
 - Outcome: A Kick-backed session can start, receive chat, and show live messages in the UI.

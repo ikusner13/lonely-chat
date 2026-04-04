@@ -11,7 +11,7 @@ export interface KickPlatformConfigShape {
   readonly scopes: readonly string[];
 }
 
-const kickScopes = ["chat:write"] as const;
+const kickScopes = ["chat:write", "events:subscribe"] as const;
 
 export class KickPlatformConfig extends ServiceMap.Service<
   KickPlatformConfig,

@@ -7,11 +7,13 @@ import * as Stream from "effect/Stream";
 import { BotTokenId, BotTokenRecord } from "../bots/bot-token-record";
 import { BotId as PersistedBotId, BotRecord } from "../bots/bot-record";
 import type { BotServiceShape } from "../bots/Services/bot-service";
+import { makeKickSessionPlatformAdapter } from "./Layers/kick-platform-adapter";
 import { makeMockPlatformAdapter } from "./Layers/mock-platform-adapter";
 import { makeTwitchPlatformAdapter } from "./Layers/twitch-platform-adapter";
 import { BotId, ChannelName, ChatUsername } from "./Services/platform-adapter";
 import type { BotConnection } from "./Services/platform-adapter";
 import { TwitchTestMessageRequest } from "./Services/twitch-platform-adapter";
+import type { KickPlatformConfigShape } from "./Services/kick-platform-config";
 import type { TwitchPlatformConfigShape } from "./Services/twitch-platform-config";
 
 const mockBot: BotConnection = {
@@ -29,6 +31,13 @@ const twitchConfig: TwitchPlatformConfigShape = {
   clientSecret: Redacted.make("twitch-client-secret"),
   redirectUri: "http://localhost:5173/auth/twitch/callback",
   scopes: ["chat:read", "chat:edit"],
+};
+
+const kickConfig: KickPlatformConfigShape = {
+  clientId: "kick-client-id",
+  clientSecret: Redacted.make("kick-client-secret"),
+  redirectUri: "http://localhost:5173/auth/kick/callback",
+  scopes: ["chat:write", "events:subscribe"],
 };
 
 const makeTwitchBot = (): BotRecord =>
@@ -71,6 +80,115 @@ const makeTwitchToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>): B
     updatedAt,
     ...overrides,
   });
+
+const makeKickBot = (): BotRecord =>
+  new BotRecord({
+    createdAt,
+    description: "measured play-by-play",
+    displayName: "Kick Pixel",
+    enabled: true,
+    exampleMessages: ["steady pace", "reset the lobby", "keep it clean"],
+    fallbackModels: [],
+    firstMessage: null,
+    id: PersistedBotId.makeUnsafe("bot-kick-pixel"),
+    maxTokens: 120,
+    model: "openai/gpt-5-mini",
+    name: "kick_pixel",
+    personality: "observant and dry",
+    platform: "kick",
+    postHistoryPrompt: null,
+    responseLength: {
+      max: 8,
+      min: 3,
+    },
+    systemPrompt: null,
+    talkativeness: 35,
+    temperature: 0.5,
+    updatedAt,
+    vocabularyRules: ["avoid slang"],
+  });
+
+const makeKickToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>): BotTokenRecord =>
+  new BotTokenRecord({
+    accessToken: "kick-access-token-1",
+    botId: bot.id,
+    createdAt,
+    expiresAt: "2026-04-04T00:00:00.000Z",
+    id: BotTokenId.makeUnsafe(`token-${bot.id}`),
+    platform: "kick",
+    refreshToken: "kick-refresh-token-1",
+    scopes: ["chat:write", "events:subscribe"],
+    updatedAt,
+    ...overrides,
+  });
+
+class FakeKickListenerHandle {
+  private active = true;
+  private readonly onUnsubscribe: () => void;
+
+  constructor(onUnsubscribe: () => void) {
+    this.onUnsubscribe = onUnsubscribe;
+  }
+
+  unsubscribe(): void {
+    if (!this.active) {
+      return;
+    }
+
+    this.active = false;
+    this.onUnsubscribe();
+  }
+}
+
+class FakeKickSessionClient {
+  readonly sentMessages: string[] = [];
+  connectCalls = 0;
+  disconnectCalls = 0;
+
+  private readonly messageListeners = new Set<
+    (message: {
+      readonly channel: string;
+      readonly text: string;
+      readonly username: string;
+    }) => void
+  >();
+
+  async connect(): Promise<void> {
+    this.connectCalls += 1;
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnectCalls += 1;
+  }
+
+  onMessage(
+    listener: (message: {
+      readonly channel: string;
+      readonly text: string;
+      readonly username: string;
+    }) => void,
+  ): FakeKickListenerHandle {
+    this.messageListeners.add(listener);
+
+    return new FakeKickListenerHandle(() => {
+      this.messageListeners.delete(listener);
+    });
+  }
+
+  async sendMessage(text: string): Promise<void> {
+    this.sentMessages.push(text);
+  }
+
+  emitIncomingMessage(channel: string, username: string, text: string): void {
+    for (const listener of this.messageListeners) {
+      listener({
+        channel,
+        text,
+        username,
+      });
+    }
+  }
+}
 
 const makeBotService = ({
   bot,
@@ -282,6 +400,108 @@ describe("twitch platform adapter", () => {
         "say:lonely_chat:hello twitch",
         "quit",
       ]);
+    }),
+  );
+});
+
+describe("kick session platform adapter", () => {
+  it.effect("connects a Kick bot, refreshes expired credentials, and streams chat messages", () =>
+    Effect.gen(function* connectsAKickBotRefreshesExpiredCredentialsAndStreamsChatMessages() {
+      const bot = makeKickBot();
+      const chatClient = new FakeKickSessionClient();
+      const events: string[] = [];
+      let persistedToken: BotTokenRecord | null = null;
+
+      const kickPlatformAdapter = yield* makeKickSessionPlatformAdapter({
+        botService: makeBotService({
+          bot,
+          token: makeKickToken(bot, {
+            accessToken: "kick-expired-access-token",
+            expiresAt: "2026-04-02T00:00:00.000Z",
+            refreshToken: "kick-expired-refresh-token",
+          }),
+          onUpsert: (token) => {
+            persistedToken = token;
+          },
+        }),
+        buildSessionClient: ({ accessToken, channel }) => {
+          events.push(`build:${channel}:${accessToken}`);
+          return chatClient;
+        },
+        config: kickConfig,
+        createEventSubscriptions: async () => ["kick-subscription-1"],
+        deleteEventSubscriptions: async () => undefined,
+        exchangeAuthorizationCode: async () => {
+          throw new Error("not used");
+        },
+        now: () => updatedAt,
+        postChatMessage: async ({ accessToken, text }) => {
+          events.push(`send:${accessToken}:${text}`);
+        },
+        refreshAccessToken: async ({ refreshToken }) => {
+          events.push(`refresh:${refreshToken}`);
+          return {
+            accessToken: "kick-fresh-access-token",
+            expiresAt: "2026-04-06T00:00:00.000Z",
+            refreshToken: "kick-fresh-refresh-token",
+            scopes: ["chat:write", "events:subscribe"],
+          };
+        },
+      });
+      const kickBot: BotConnection = {
+        botId: BotId.makeUnsafe(bot.id),
+        channel: ChannelName.makeUnsafe("Lonely_Channel"),
+        platform: "kick",
+        username: ChatUsername.makeUnsafe(bot.name),
+      };
+
+      const messagesFiber = yield* kickPlatformAdapter
+        .listenChat(ChannelName.makeUnsafe("lonely_channel"))
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+
+      yield* Effect.yieldNow;
+      yield* kickPlatformAdapter.connect(kickBot);
+      yield* kickPlatformAdapter.sendMessage(kickBot, "hello kick");
+      yield* Effect.yieldNow;
+      chatClient.emitIncomingMessage("lonely_channel", "viewer-7", "chat says hi");
+
+      const messages = [...(yield* Fiber.join(messagesFiber))];
+
+      expect(chatClient.connectCalls).toBe(1);
+      expect(chatClient.sentMessages).toEqual(["hello kick"]);
+      expect(persistedToken).toEqual(
+        makeKickToken(bot, {
+          accessToken: "kick-fresh-access-token",
+          expiresAt: "2026-04-06T00:00:00.000Z",
+          refreshToken: "kick-fresh-refresh-token",
+          updatedAt,
+        }),
+      );
+      expect(events).toEqual([
+        "refresh:kick-expired-refresh-token",
+        "build:lonely_channel:kick-fresh-access-token",
+      ]);
+      expect(messages).toEqual([
+        {
+          botId: kickBot.botId,
+          channel: kickBot.channel,
+          direction: "outgoing",
+          platform: "kick",
+          text: "hello kick",
+          username: kickBot.username,
+        },
+        {
+          channel: kickBot.channel,
+          direction: "incoming",
+          platform: "kick",
+          text: "chat says hi",
+          username: ChatUsername.makeUnsafe("viewer-7"),
+        },
+      ]);
+
+      yield* kickPlatformAdapter.disconnect(kickBot);
+
+      expect(chatClient.disconnectCalls).toBe(1);
     }),
   );
 });

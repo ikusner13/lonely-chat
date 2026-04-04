@@ -393,6 +393,68 @@ class FakeTwitchSessionChatClient {
   }
 }
 
+class FakeKickSessionListenerHandle {
+  private readonly onUnsubscribe: () => void;
+
+  constructor(onUnsubscribe: () => void) {
+    this.onUnsubscribe = onUnsubscribe;
+  }
+
+  unsubscribe(): void {
+    this.onUnsubscribe();
+  }
+}
+
+class FakeKickSessionChatClient {
+  readonly sentMessages: string[] = [];
+  connectCalls = 0;
+  disconnectCalls = 0;
+
+  private readonly messageListeners = new Set<
+    (message: {
+      readonly channel: string;
+      readonly text: string;
+      readonly username: string;
+    }) => void
+  >();
+
+  async connect(): Promise<void> {
+    this.connectCalls += 1;
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnectCalls += 1;
+  }
+
+  onMessage(
+    listener: (message: {
+      readonly channel: string;
+      readonly text: string;
+      readonly username: string;
+    }) => void,
+  ): FakeKickSessionListenerHandle {
+    this.messageListeners.add(listener);
+
+    return new FakeKickSessionListenerHandle(() => {
+      this.messageListeners.delete(listener);
+    });
+  }
+
+  async sendMessage(text: string): Promise<void> {
+    this.sentMessages.push(text);
+  }
+
+  emitIncomingMessage(channel: string, username: string, text: string): void {
+    for (const listener of this.messageListeners) {
+      listener({
+        channel,
+        text,
+        username,
+      });
+    }
+  }
+}
+
 const waitForStoredSessionMessages = (
   dbPath: string,
   expectedCount: number,
@@ -453,6 +515,55 @@ const makeTwitchSessionTestLayer = (
         expiresAt: "2026-04-05T00:00:00.000Z",
         refreshToken: "refreshed-refresh-token",
         scopes: ["chat:read", "chat:edit"],
+      }),
+    },
+  }).pipe(Layer.provide(botServiceLayer));
+  const sessionDependencies = Layer.mergeAll(
+    aiLayer,
+    botServiceLayer,
+    databaseLayer,
+    platformLayer,
+    scenarioServiceLayer,
+  );
+  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionDependencies));
+
+  return Layer.mergeAll(
+    aiLayer,
+    botServiceLayer,
+    platformLayer,
+    scenarioServiceLayer,
+    sessionServiceLayer,
+  );
+};
+
+const makeKickSessionTestLayer = (
+  dbPath: string,
+  chatClient: FakeKickSessionChatClient,
+  aiLayer: Layer.Layer<AiClient> = FakeAiClientLive,
+) => {
+  const databaseLayer = makeDatabaseLayer(dbPath);
+  const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
+  const platformLayer = makePlatformAdapterLayer({
+    kickConfig: {
+      clientId: "kick-client-id",
+      clientSecret: Redacted.make("unused"),
+      redirectUri: "http://localhost:4173/auth/kick/callback",
+      scopes: ["chat:write", "events:subscribe"],
+    },
+    kickDependencies: {
+      buildSessionClient: ({ channel }) => {
+        expect(channel).toBe("lonely_channel");
+        return chatClient;
+      },
+      createEventSubscriptions: async () => ["kick-subscription-1"],
+      deleteEventSubscriptions: async () => undefined,
+      now: () => "2026-04-03T00:00:00.000Z",
+      refreshAccessToken: async () => ({
+        accessToken: "kick-refreshed-access-token",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+        refreshToken: "kick-refreshed-refresh-token",
+        scopes: ["chat:write", "events:subscribe"],
       }),
     },
   }).pipe(Layer.provide(botServiceLayer));
@@ -648,6 +759,72 @@ describe("session service", () => {
       expect(typeof persistedMessage?.session_id).toBe("string");
       expect(persistedMessage?.tokens_used).toBeNull();
       expect(persistedMessage?.username).toBe("viewer-42");
+    }),
+  );
+
+  it.effect("starts a Kick session and persists live chat from the configured channel", () =>
+    Effect.gen(function* startsAKickSessionAndPersistsLiveChatFromTheConfiguredChannel() {
+      const dbPath = yield* createDatabasePath;
+      const kickBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-kick-1"),
+        name: "kick_pixel",
+        platform: "kick",
+      });
+      const kickChatClient = new FakeKickSessionChatClient();
+      const sessionLayer = makeKickSessionTestLayer(dbPath, kickChatClient);
+
+      yield* insertStoredBot(dbPath, kickBot);
+      yield* insertChannelSetting(dbPath, "#Lonely_Channel");
+
+      const persistedMessage = yield* Effect.gen(function* exerciseKickSessionLifecycle() {
+        const botService = yield* BotService;
+        const sessionService = yield* SessionService;
+
+        yield* botService.upsertBotToken(
+          makeStoredBotToken(kickBot, {
+            accessToken: "kick-access-token",
+            platform: "kick",
+            refreshToken: "kick-refresh-token",
+            scopes: ["chat:write", "events:subscribe"],
+          }),
+        );
+
+        const startedSession = yield* sessionService.startSession();
+
+        expect(startedSession.platform).toBe("kick");
+        expect(startedSession.channel).toBe("lonely_channel");
+        expect(kickChatClient.connectCalls).toBe(1);
+
+        const liveMessagesFiber = yield* sessionService.liveMessages.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* Effect.yieldNow;
+        kickChatClient.emitIncomingMessage("lonely_channel", "viewer-kick", "hello from kick");
+
+        const [liveMessage] = [...(yield* Fiber.join(liveMessagesFiber))];
+
+        expect(liveMessage?.platform).toBe("kick");
+        expect(liveMessage?.content).toBe("hello from kick");
+
+        const [storedMessage] = yield* waitForStoredSessionMessages(dbPath, 1);
+
+        yield* sessionService.stopSession();
+
+        return storedMessage;
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(kickChatClient.disconnectCalls).toBe(1);
+      expect(persistedMessage?.bot_id).toBeNull();
+      expect(persistedMessage?.content).toBe("hello from kick");
+      expect(persistedMessage?.is_bot).toBe(0);
+      expect(persistedMessage?.model_used).toBeNull();
+      expect(persistedMessage?.platform).toBe("kick");
+      expect(typeof persistedMessage?.session_id).toBe("string");
+      expect(persistedMessage?.tokens_used).toBeNull();
+      expect(persistedMessage?.username).toBe("viewer-kick");
     }),
   );
 

@@ -79,6 +79,7 @@ const silenceThresholdMs = 15_000;
 const sessionLimitCheckInterval = Duration.seconds(1);
 const alertThresholdPercents = [50, 75, 90] as const;
 const channelSettingKey = "channel";
+const kickPlatform: SessionRecord["platform"] = "kick";
 const twitchPlatform: SessionRecord["platform"] = "twitch";
 const decodeStoredChannelValue = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String));
 
@@ -414,12 +415,15 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
-      const getTwitchReadyBotConnections = Effect.fn("SessionService.getTwitchReadyBotConnections")(
-        function* getTwitchReadyBotConnectionsEffect(channel: SessionRecord["channel"]) {
-          const twitchBots = yield* listSessionBots(twitchPlatform);
+      const getReadyBotConnections = Effect.fn("SessionService.getReadyBotConnections")(
+        function* getReadyBotConnectionsEffect(
+          platform: Extract<SessionRecord["platform"], "kick" | "twitch">,
+          channel: SessionRecord["channel"],
+        ) {
+          const platformBots = yield* listSessionBots(platform);
           const connections: BotConnection[] = [];
 
-          for (const bot of twitchBots) {
+          for (const bot of platformBots) {
             const token = yield* botService.getBotToken(bot.id);
 
             if (token === null) {
@@ -429,7 +433,7 @@ export const SessionServiceLive = Layer.effect(
             connections.push({
               botId: PlatformBotId.makeUnsafe(bot.id),
               channel,
-              platform: twitchPlatform,
+              platform,
               username: ChatUsername.makeUnsafe(bot.name),
             });
           }
@@ -473,9 +477,19 @@ export const SessionServiceLive = Layer.effect(
       const resolveSessionBootstrap = Effect.fn("SessionService.resolveSessionBootstrap")(
         function* resolveSessionBootstrapEffect() {
           const channel = yield* getConfiguredChannel();
-          const twitchConnections = yield* getTwitchReadyBotConnections(channel);
+          const twitchConnections = yield* getReadyBotConnections(twitchPlatform, channel);
 
-          return twitchConnections.length === 0
+          if (twitchConnections.length > 0) {
+            return {
+              channel,
+              initialConnections: twitchConnections,
+              platform: twitchPlatform,
+            };
+          }
+
+          const kickConnections = yield* getReadyBotConnections(kickPlatform, channel);
+
+          return kickConnections.length === 0
             ? {
                 channel,
                 initialConnections: [] as readonly BotConnection[],
@@ -483,8 +497,8 @@ export const SessionServiceLive = Layer.effect(
               }
             : {
                 channel,
-                initialConnections: twitchConnections,
-                platform: twitchPlatform,
+                initialConnections: kickConnections,
+                platform: kickPlatform,
               };
         },
       );
@@ -1483,7 +1497,7 @@ export const SessionServiceLive = Layer.effect(
               (cause) =>
                 new SessionStartError({
                   cause,
-                  reason: "Could not connect the configured live Twitch bot.",
+                  reason: `Could not connect the configured live ${sessionBootstrap.platform} bot.`,
                 }),
             ),
           );
