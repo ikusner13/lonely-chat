@@ -8,6 +8,7 @@
     "preview": "vp preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test:regression": "node ./node_modules/vitest/vitest.mjs run src/sessions/session-service.test.ts src/orchestration/mention-response.test.ts src/orchestration/director.test.ts src/platforms/platform-adapter.test.ts",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

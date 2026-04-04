@@ -217,7 +217,7 @@ Use it with:
 - Spec inputs: `specs/technical-effect.md`, `specs/platforms.md`, `specs/ui.md`
 - Verify: failure-state transition tests, degraded/offline UI tests, `vp check`, targeted `vp test`
 
-### [ ] VS-25: Regression suite for core conversation loops
+### [x] VS-25: Regression suite for core conversation loops
 
 - Depends on: `VS-16`, `VS-17`, `VS-20`, `VS-22`, `VS-24`
 - Outcome: There is a stable regression suite covering session control, chat persistence, speaker selection, scenarios, limits, and platform adapter contracts.

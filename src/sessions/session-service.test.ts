@@ -2324,6 +2324,55 @@ describe("session service", () => {
     }),
   );
 
+  it.effect("returns false when a manual scenario cannot run for the active session", () =>
+    Effect.gen(function* returnsFalseWhenAManualScenarioCannotRunForTheActiveSession() {
+      const dbPath = yield* createDatabasePath;
+      yield* insertStoredBot(dbPath, makeStoredBot());
+      const fakeAiClient = yield* makeFakeAiClient;
+      const aiLayer = Layer.succeed(AiClient, AiClient.of(fakeAiClient.aiClient));
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, aiLayer);
+      const disabledScenario = makeManualScenario({
+        enabled: false,
+        id: ScenarioId.makeUnsafe("scenario-disabled-manual"),
+        name: "Disabled Manual Merch Push",
+      });
+      const timedScenario = makeManualScenario({
+        id: ScenarioId.makeUnsafe("scenario-timed-merch"),
+        name: "Timed Merch Push",
+        triggerType: "timed",
+      });
+
+      yield* Effect.gen(function* exerciseInvalidManualScenarioRuns() {
+        const scenarioService = yield* ScenarioService;
+        const sessionService = yield* SessionService;
+
+        expect(yield* sessionService.runScenario(disabledScenario.id)).toBe(false);
+
+        yield* scenarioService.createScenario(disabledScenario);
+        yield* scenarioService.createScenario(timedScenario);
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        expect(yield* sessionService.runScenario(disabledScenario.id)).toBe(false);
+        expect(yield* sessionService.runScenario(timedScenario.id)).toBe(false);
+        expect(yield* sessionService.runScenario(ScenarioId.makeUnsafe("scenario-missing"))).toBe(
+          false,
+        );
+
+        yield* TestClock.adjust("5 seconds");
+
+        expect(yield* loadStoredSessionMessages(dbPath)).toHaveLength(0);
+        expect(yield* fakeAiClient.getRequests).toHaveLength(0);
+        expect(yield* mockPlatformAdapter.getSentMessages).toHaveLength(0);
+      }).pipe(Effect.provide(appLayer));
+    }),
+  );
+
   it.effect("schedules a silence-breaker response after inactivity", () =>
     Effect.gen(function* schedulesASilenceBreakerResponseAfterInactivity() {
       const dbPath = yield* createDatabasePath;
