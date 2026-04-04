@@ -10,7 +10,7 @@ import type { AiClient } from "../../ai/Services/ai-client";
 import { OpenRouterAiClientLive } from "../../ai/Layers/openrouter-ai-client";
 import { BotServiceLive } from "../../bots/Layers/bot-service";
 import type { BotService } from "../../bots/Services/bot-service";
-import { getDatabasePath, makeDatabaseLayer } from "../../db/database";
+import { makeDatabaseLayer } from "../../db/database";
 import { PlatformAdapterLive } from "../../platforms/Layers/platform-adapter";
 import { ScenarioServiceLive } from "../../scenarios/Layers/scenario-service";
 import type { ScenarioService } from "../../scenarios/Services/scenario-service";
@@ -20,12 +20,12 @@ import type { SessionService } from "../../sessions/Services/session-service";
 export type AppServices = AiClient | BotService | ScenarioService | SessionService;
 
 const internalServerError = 500;
+const appMemoMap = Layer.makeMemoMapUnsafe();
 
 const makeAppRuntime = (
-  dbPath: string,
   aiLayer: Layer.Layer<AiClient, Config.ConfigError> = OpenRouterAiClientLive,
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
-  const databaseLayer = makeDatabaseLayer(dbPath);
+  const databaseLayer = makeDatabaseLayer();
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
   const platformAdapterLayer = PlatformAdapterLive.pipe(Layer.provide(botServiceLayer));
   const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
@@ -40,10 +40,11 @@ const makeAppRuntime = (
 
   return ManagedRuntime.make(
     Layer.mergeAll(aiLayer, botServiceLayer, scenarioServiceLayer, sessionServiceLayer),
+    { memoMap: appMemoMap },
   );
 };
 
-export const runtime = makeAppRuntime(getDatabasePath());
+export const runtime = makeAppRuntime();
 
 const serializeUnknown = (value: unknown): unknown => {
   if (value instanceof Error) {

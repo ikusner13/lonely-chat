@@ -85,11 +85,11 @@ const parseCostUsd = (headers: Record<string, string>): number => {
 
 type OpenRouterClientService = typeof OpenRouterClient.OpenRouterClient.Service;
 
-const makeAttempt = (
+const makeAttempt = Effect.fnUntraced(function* makeAttemptEffect(
   client: OpenRouterClientService,
   request: AiGenerateRequest,
   model: string,
-) => {
+) {
   const stopSequence = request.settings?.stopSequences[0];
   const payload: OpenRouterChatCompletionRequest = {
     messages: toOpenRouterMessages(request.messages),
@@ -103,17 +103,7 @@ const makeAttempt = (
       : { temperature: request.settings.temperature }),
   };
 
-  return client.createChatCompletion(payload).pipe(
-    Effect.map(([body, response]): AiGenerateResponse => {
-      const headers = response.headers as Record<string, string>;
-
-      return {
-        costUsd: parseCostUsd(headers),
-        model: AiModelName.makeUnsafe(body.model.trim()),
-        text: extractResponseText(body),
-        tokensUsed: body.usage?.total_tokens ?? 0,
-      };
-    }),
+  const [body, response] = yield* client.createChatCompletion(payload).pipe(
     Effect.mapError(
       (cause) =>
         new AiGenerationError({
@@ -123,17 +113,26 @@ const makeAttempt = (
         }),
     ),
   );
-};
 
-const generateWithFallback = (
+  const headers = response.headers as Record<string, string>;
+
+  return {
+    costUsd: parseCostUsd(headers),
+    model: AiModelName.makeUnsafe(body.model.trim()),
+    text: extractResponseText(body),
+    tokensUsed: body.usage?.total_tokens ?? 0,
+  };
+});
+
+const generateWithFallback = Effect.fnUntraced(function* generateWithFallbackEffect(
   client: OpenRouterClientService,
   request: AiGenerateRequest,
   attemptModels: readonly string[],
-): Effect.Effect<AiGenerateResponse, AiGenerationError> => {
+): Effect.fn.Return<AiGenerateResponse, AiGenerationError> {
   const [currentModel, ...remainingModels] = attemptModels;
 
   if (currentModel === undefined) {
-    return Effect.fail(
+    return yield* Effect.fail(
       new AiGenerationError({
         botName: request.botName,
         cause: new Error("OpenRouter AI request did not include any models."),
@@ -142,26 +141,24 @@ const generateWithFallback = (
     );
   }
 
-  return Effect.gen(function* generateWithFallbackEffect() {
-    const attempt = yield* Effect.result(makeAttempt(client, request, currentModel));
+  const attempt = yield* Effect.result(makeAttempt(client, request, currentModel));
 
-    if (Result.isSuccess(attempt)) {
-      return attempt.success;
-    }
+  if (Result.isSuccess(attempt)) {
+    return attempt.success;
+  }
 
-    if (remainingModels.length === 0) {
-      return yield* Effect.fail(attempt.failure);
-    }
+  if (remainingModels.length === 0) {
+    return yield* Effect.fail(attempt.failure);
+  }
 
-    const [nextModel] = remainingModels;
+  const [nextModel] = remainingModels;
 
-    if (currentModel === request.model && nextModel === request.model) {
-      yield* Effect.sleep(Duration.seconds(1));
-    }
+  if (currentModel === request.model && nextModel === request.model) {
+    yield* Effect.sleep(Duration.seconds(1));
+  }
 
-    return yield* generateWithFallback(client, request, remainingModels);
-  });
-};
+  return yield* generateWithFallback(client, request, remainingModels);
+});
 
 const makeAiClientShape = (client: OpenRouterClientService): AiClientShape => ({
   generateText: Effect.fn("AiClient.generateText")(function* generateOpenRouterText(

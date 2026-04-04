@@ -1,5 +1,6 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -21,27 +22,31 @@ const DatabaseSetupLive = Layer.effectDiscard(
   }),
 ).pipe(Layer.provideMerge(MigrationsLive));
 
-export const getDatabasePath = (): string => process.env["DATABASE_PATH"] ?? defaultDatabasePath;
+const resolveDatabasePath = Config.string("DATABASE_PATH").pipe(
+  Config.orElse(() => Config.succeed(defaultDatabasePath)),
+);
 
 export const makeDatabaseLayer = (
-  dbPath: string,
+  dbPath?: string,
 ): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient, unknown> =>
   Layer.unwrap(
     Effect.gen(function* buildDatabaseLayer() {
-      if (dbPath !== ":memory:") {
+      const resolvedPath = dbPath ?? (yield* resolveDatabasePath);
+
+      if (resolvedPath !== ":memory:") {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
-        yield* fileSystem.makeDirectory(path.dirname(dbPath), {
+        yield* fileSystem.makeDirectory(path.dirname(resolvedPath), {
           recursive: true,
         });
       }
 
-      return Layer.provideMerge(DatabaseSetupLive, SqliteClient.layer({ filename: dbPath }));
+      return Layer.provideMerge(DatabaseSetupLive, SqliteClient.layer({ filename: resolvedPath }));
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])),
   );
 
-export const initializeDatabase = (dbPath: string): Effect.Effect<void, unknown> =>
+export const initializeDatabase = (dbPath?: string): Effect.Effect<void, unknown> =>
   Effect.scoped(
     Effect.gen(function* bootDatabase() {
       const sql = yield* SqlClient.SqlClient;

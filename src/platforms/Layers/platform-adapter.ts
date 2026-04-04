@@ -1,6 +1,5 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 
 import { BotService } from "../../bots/Services/bot-service";
@@ -20,8 +19,10 @@ import {
   PlatformSendError,
 } from "../Services/platform-adapter";
 import type { KickAdapterDependencies } from "./kick-platform-adapter";
+import { KickPlatformConfig } from "../Services/kick-platform-config";
 import type { KickPlatformConfigShape } from "../Services/kick-platform-config";
 import type { TwitchAdapterDependencies } from "./twitch-platform-adapter";
+import { TwitchPlatformConfig } from "../Services/twitch-platform-config";
 import type { TwitchPlatformConfigShape } from "../Services/twitch-platform-config";
 
 interface PlatformAdapterLayerOptions {
@@ -31,53 +32,23 @@ interface PlatformAdapterLayerOptions {
   readonly twitchConfig?: TwitchPlatformConfigShape | null;
 }
 
-const readConfiguredTwitchPlatform = (): TwitchPlatformConfigShape | null => {
-  const clientId = process.env["TWITCH_CLIENT_ID"]?.trim();
-  const clientSecret = process.env["TWITCH_CLIENT_SECRET"]?.trim();
-  const redirectUri = process.env["TWITCH_REDIRECT_URI"]?.trim();
+const readConfiguredTwitchPlatform: Effect.Effect<TwitchPlatformConfigShape | null> = Effect.gen(
+  function* readTwitchConfig() {
+    return yield* TwitchPlatformConfig;
+  },
+).pipe(
+  Effect.provide(TwitchPlatformConfig.layer),
+  Effect.catch(() => Effect.succeed(null as TwitchPlatformConfigShape | null)),
+);
 
-  if (
-    clientId === undefined ||
-    clientId.length === 0 ||
-    clientSecret === undefined ||
-    clientSecret.length === 0 ||
-    redirectUri === undefined ||
-    redirectUri.length === 0
-  ) {
-    return null;
-  }
-
-  return {
-    clientId,
-    clientSecret: Redacted.make(clientSecret),
-    redirectUri,
-    scopes: ["chat:read", "chat:edit"],
-  };
-};
-
-const readConfiguredKickPlatform = (): KickPlatformConfigShape | null => {
-  const clientId = process.env["KICK_CLIENT_ID"]?.trim();
-  const clientSecret = process.env["KICK_CLIENT_SECRET"]?.trim();
-  const redirectUri = process.env["KICK_REDIRECT_URI"]?.trim();
-
-  if (
-    clientId === undefined ||
-    clientId.length === 0 ||
-    clientSecret === undefined ||
-    clientSecret.length === 0 ||
-    redirectUri === undefined ||
-    redirectUri.length === 0
-  ) {
-    return null;
-  }
-
-  return {
-    clientId,
-    clientSecret: Redacted.make(clientSecret),
-    redirectUri,
-    scopes: ["chat:write", "events:subscribe"],
-  };
-};
+const readConfiguredKickPlatform: Effect.Effect<KickPlatformConfigShape | null> = Effect.gen(
+  function* readKickConfig() {
+    return yield* KickPlatformConfig;
+  },
+).pipe(
+  Effect.provide(KickPlatformConfig.layer),
+  Effect.catch(() => Effect.succeed(null as KickPlatformConfigShape | null)),
+);
 
 const makeUnsupportedConnectionError = (
   bot: BotConnection,
@@ -223,8 +194,12 @@ export const makePlatformAdapterLayer = (
     Effect.gen(function* makePlatformAdapterLayerEffect() {
       const botService = yield* BotService;
       const { platformAdapter: mockPlatformAdapter } = yield* makeMockPlatformAdapter;
-      const kickConfig = options.kickConfig ?? readConfiguredKickPlatform();
-      const twitchConfig = options.twitchConfig ?? readConfiguredTwitchPlatform();
+      const kickConfig =
+        options.kickConfig === undefined ? yield* readConfiguredKickPlatform : options.kickConfig;
+      const twitchConfig =
+        options.twitchConfig === undefined
+          ? yield* readConfiguredTwitchPlatform
+          : options.twitchConfig;
       const kickPlatformAdapter =
         kickConfig === null
           ? null

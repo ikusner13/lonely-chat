@@ -1,14 +1,15 @@
 import type { Effect, Stream } from "effect";
 import { Schema, ServiceMap } from "effect";
 
+import { BotId } from "../../bots/bot-record";
+
+export { BotId };
+
 export const PlatformName = Schema.Literals(["mock", "twitch", "kick"]);
 export type PlatformName = typeof PlatformName.Type;
 
 export const ChatMessageDirection = Schema.Literals(["incoming", "outgoing"]);
 export type ChatMessageDirection = typeof ChatMessageDirection.Type;
-
-export const BotId = Schema.String.pipe(Schema.brand("BotId"));
-export type BotId = typeof BotId.Type;
 
 export const ChannelName = Schema.String.pipe(Schema.brand("ChannelName"));
 export type ChannelName = typeof ChannelName.Type;
