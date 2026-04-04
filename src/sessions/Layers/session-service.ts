@@ -23,10 +23,18 @@ import {
   makeMentionResponseRequest,
   makeScenarioResponseRequest,
   makeSilenceBreakerRequest,
+  responseTriggerForSelectionReason,
   selectSilenceBreaker,
   selectSpeakers,
 } from "../../orchestration/mention-response";
 import type { BotSpeakerState, ResponseTrigger } from "../../orchestration/mention-response";
+import {
+  decodeDirectorEvaluation,
+  makeDirectorDirective,
+  makeDirectorEvaluationRequest,
+  shouldEvaluateDirector,
+} from "../../orchestration/director";
+import type { DirectorDirective } from "../../orchestration/director";
 import {
   BotId as PlatformBotId,
   ChannelName,
@@ -304,6 +312,10 @@ export const SessionServiceLive = Layer.effect(
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
       const lastActivityAtRef = yield* Ref.make<number | null>(null);
       const pendingGeneratedMessagesRef = yield* Ref.make<readonly PendingGeneratedMessage[]>([]);
+      const directorDirectiveRef = yield* Ref.make<DirectorDirective | null>(null);
+      const directorLastEvaluatedAtRef = yield* Ref.make<number | null>(null);
+      const directorMessagesSinceLastEvaluationRef = yield* Ref.make(0);
+      const activeScenarioTopicRef = yield* Ref.make<string | null>(null);
 
       const getCurrentTimestamp = Effect.fn("SessionService.getCurrentTimestamp")(
         function* getCurrentTimestampEffect() {
@@ -411,6 +423,10 @@ export const SessionServiceLive = Layer.effect(
 
           yield* PubSub.publish(liveMessagesPubSub, storedMessage);
           yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
+          yield* Ref.update(
+            directorMessagesSinceLastEvaluationRef,
+            (messageCount) => messageCount + 1,
+          );
         },
       );
 
@@ -480,6 +496,8 @@ export const SessionServiceLive = Layer.effect(
       const stopActiveScenario = Effect.fn("SessionService.stopActiveScenario")(
         function* stopActiveScenarioEffect() {
           const scenarioFiber = yield* Ref.get(scenarioFiberRef);
+
+          yield* Ref.set(activeScenarioTopicRef, null);
 
           if (scenarioFiber === null) {
             return;
@@ -581,6 +599,78 @@ export const SessionServiceLive = Layer.effect(
         },
       );
 
+      const consumeDirectorHint = Effect.fn("SessionService.consumeDirectorHint")(
+        function* consumeDirectorHintEffect() {
+          const directorDirective = yield* Ref.get(directorDirectiveRef);
+
+          if (directorDirective === null) {
+            return null;
+          }
+
+          yield* Ref.set(directorDirectiveRef, null);
+
+          return directorDirective.hint;
+        },
+      );
+
+      const evaluateDirector = Effect.fn("SessionService.evaluateDirector")(
+        function* evaluateDirectorEffect(session: SessionRecord) {
+          const bots = yield* botService.listBots();
+          const recentMessages = yield* getSessionMessages(session.id);
+
+          if (bots.length === 0 || recentMessages.length === 0) {
+            return;
+          }
+
+          const now = yield* Clock.currentTimeMillis;
+          const activeScenarioTopic = yield* Ref.get(activeScenarioTopicRef);
+          const lastEvaluatedAt = yield* Ref.get(directorLastEvaluatedAtRef);
+          const messagesSinceLastEvaluation = yield* Ref.get(
+            directorMessagesSinceLastEvaluationRef,
+          );
+          const currentDirective = yield* Ref.get(directorDirectiveRef);
+
+          if (
+            !shouldEvaluateDirector({
+              lastEvaluatedAt,
+              messagesSinceLastEvaluation,
+              now,
+              scenarioInjectionRequested: activeScenarioTopic !== null && currentDirective === null,
+            })
+          ) {
+            return;
+          }
+
+          const evaluation = yield* aiClient
+            .generateText(
+              makeDirectorEvaluationRequest(
+                bots,
+                session.platform,
+                recentMessages,
+                activeScenarioTopic,
+              ),
+            )
+            .pipe(
+              Effect.map((response) => response.text),
+              Effect.flatMap((responseText) =>
+                Effect.try({
+                  catch: () => null,
+                  try: () => decodeDirectorEvaluation(responseText),
+                }),
+              ),
+              Effect.catch(() => Effect.succeed(null)),
+            );
+
+          if (evaluation === null) {
+            return;
+          }
+
+          yield* Ref.set(directorDirectiveRef, makeDirectorDirective(evaluation));
+          yield* Ref.set(directorLastEvaluatedAtRef, now);
+          yield* Ref.set(directorMessagesSinceLastEvaluationRef, 0);
+        },
+      );
+
       const stopMessageListener = Effect.fn("SessionService.stopMessageListener")(
         function* stopMessageListenerEffect() {
           const messageListener = yield* Ref.get(messageListenerRef);
@@ -625,6 +715,10 @@ export const SessionServiceLive = Layer.effect(
         yield* Ref.set(lastActivityAtRef, null);
         yield* Ref.set(pendingGeneratedMessagesRef, []);
         yield* Ref.set(speakerStatesRef, []);
+        yield* Ref.set(directorDirectiveRef, null);
+        yield* Ref.set(directorLastEvaluatedAtRef, null);
+        yield* Ref.set(directorMessagesSinceLastEvaluationRef, 0);
+        yield* Ref.set(activeScenarioTopicRef, null);
 
         return endedSession;
       });
@@ -837,7 +931,9 @@ export const SessionServiceLive = Layer.effect(
           session: SessionRecord,
           bot: Parameters<typeof makeMentionResponseRequest>[0],
           trigger: ResponseTrigger,
-          buildRequest: Effect.Effect<Parameters<typeof aiClient.generateText>[0], SqlError>,
+          buildRequest: (
+            directorHint: string | null,
+          ) => Effect.Effect<Parameters<typeof aiClient.generateText>[0], SqlError>,
           selectionIndex = 0,
         ) {
           const scheduledResponse = yield* Effect.gen(function* runScheduledResponseEffect() {
@@ -869,7 +965,8 @@ export const SessionServiceLive = Layer.effect(
 
             yield* platformAdapter.connect(speakerConnection);
 
-            const response = yield* aiClient.generateText(yield* buildRequest);
+            const directorHint = yield* consumeDirectorHint();
+            const response = yield* aiClient.generateText(yield* buildRequest(directorHint));
 
             yield* sendGeneratedMessage(speakerConnection, response);
             yield* Ref.set(
@@ -893,8 +990,11 @@ export const SessionServiceLive = Layer.effect(
           }
 
           const speakerStates = yield* Ref.get(speakerStatesRef);
+          yield* evaluateDirector(session);
+          const directorDirective = yield* Ref.get(directorDirectiveRef);
           const selectedSpeakers = selectSpeakers(message.text, yield* botService.listBots(), {
             botStates: speakerStates,
+            directorDirective,
             now: yield* Clock.currentTimeMillis,
             recentMessages: yield* getSessionMessages(session.id),
           });
@@ -909,10 +1009,16 @@ export const SessionServiceLive = Layer.effect(
             yield* scheduleResponse(
               session,
               selectedSpeaker.bot,
-              selectedSpeaker.reason,
-              Effect.map(getSessionMessages(session.id), (recentMessages) =>
-                makeMentionResponseRequest(selectedSpeaker.bot, session.platform, recentMessages),
-              ),
+              responseTriggerForSelectionReason(selectedSpeaker.reason),
+              (directorHint) =>
+                Effect.map(getSessionMessages(session.id), (recentMessages) =>
+                  makeMentionResponseRequest(
+                    selectedSpeaker.bot,
+                    session.platform,
+                    recentMessages,
+                    directorHint,
+                  ),
+                ),
               selectionIndex,
             );
 
@@ -947,8 +1053,11 @@ export const SessionServiceLive = Layer.effect(
                 return;
               }
 
+              yield* evaluateDirector(session);
+              const directorDirective = yield* Ref.get(directorDirectiveRef);
               const silenceBreakerBot = selectSilenceBreaker(yield* botService.listBots(), {
                 botStates: yield* Ref.get(speakerStatesRef),
+                directorDirective,
                 now,
               });
 
@@ -956,12 +1065,14 @@ export const SessionServiceLive = Layer.effect(
                 return;
               }
 
-              yield* scheduleResponse(
-                session,
-                silenceBreakerBot,
-                "silence",
+              yield* scheduleResponse(session, silenceBreakerBot, "silence", (directorHint) =>
                 Effect.map(getSessionMessages(session.id), (recentMessages) =>
-                  makeSilenceBreakerRequest(silenceBreakerBot, session.platform, recentMessages),
+                  makeSilenceBreakerRequest(
+                    silenceBreakerBot,
+                    session.platform,
+                    recentMessages,
+                    directorHint,
+                  ),
                 ),
               );
             }),
@@ -1072,13 +1183,16 @@ export const SessionServiceLive = Layer.effect(
         const executableSteps = yield* buildExecutableScenarioSteps(scenario);
 
         yield* stopActiveScenario();
+        yield* Ref.set(activeScenarioTopicRef, scenario.topic);
 
         const scenarioFiber = yield* Effect.gen(function* runScenarioStepsEffect() {
           for (const step of executableSteps) {
             yield* runScenarioStep(activeSession, scenario, step);
           }
         }).pipe(
-          Effect.ensuring(Ref.set(scenarioFiberRef, null)),
+          Effect.ensuring(
+            Effect.all([Ref.set(activeScenarioTopicRef, null), Ref.set(scenarioFiberRef, null)]),
+          ),
           Effect.asVoid,
           Effect.forkIn(serviceScope),
         );
@@ -1152,6 +1266,10 @@ export const SessionServiceLive = Layer.effect(
         yield* Ref.set(speakerStatesRef, []);
         yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
         yield* Ref.set(pendingGeneratedMessagesRef, []);
+        yield* Ref.set(directorDirectiveRef, null);
+        yield* Ref.set(directorLastEvaluatedAtRef, null);
+        yield* Ref.set(directorMessagesSinceLastEvaluationRef, 0);
+        yield* Ref.set(activeScenarioTopicRef, null);
         yield* startMessageListener(session);
         yield* startSilenceBreaker(session);
         yield* startSessionTimer(session);

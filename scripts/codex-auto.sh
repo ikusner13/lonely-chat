@@ -596,14 +596,31 @@ EOF
 run_checks() {
   local iteration="$1"
   local check_log="$OUT_DIR/vp-check.$iteration.log"
+  local fmt_log="$OUT_DIR/vp-fmt.$iteration.log"
   local test_log="$OUT_DIR/vp-test.$iteration.log"
   local pack_log="$OUT_DIR/vp-pack.$iteration.log"
 
   log "running vp check; log: $check_log"
   if ! vp check >"$check_log" 2>&1; then
-    capture_failure "vp check" "$check_log"
-    tail -n 120 "$check_log"
-    return 1
+    if grep -q "Formatting issues found" "$check_log"; then
+      log "vp check reported formatting issues; running vp fmt; log: $fmt_log"
+      if ! vp fmt >"$fmt_log" 2>&1; then
+        capture_failure "vp fmt" "$fmt_log"
+        tail -n 120 "$fmt_log"
+        return 1
+      fi
+
+      log "vp fmt passed; re-running vp check; log: $check_log"
+      if ! vp check >"$check_log" 2>&1; then
+        capture_failure "vp check" "$check_log"
+        tail -n 120 "$check_log"
+        return 1
+      fi
+    else
+      capture_failure "vp check" "$check_log"
+      tail -n 120 "$check_log"
+      return 1
+    fi
   fi
   log "vp check passed"
 
@@ -724,9 +741,8 @@ while :; do
     continue
   fi
 
-  commit_if_needed "$iteration" "$slice"
-
   if [[ "$status" == "slice_complete" ]]; then
+    commit_if_needed "$iteration" "$slice"
     completed_slices=$((completed_slices + 1))
     attempts_for_slice=0
     last_selected_slice=""

@@ -150,7 +150,7 @@ Use it with:
 - Spec inputs: `specs/technical-ai.md`, `specs/technical-orchestrator.md`, `specs/data.md`
 - Verify: generation/accounting integration tests, fallback tests, `vp check`, targeted `vp test`
 
-### [ ] VS-16: Add director evaluation and hint injection
+### [x] VS-16: Add director evaluation and hint injection
 
 - Depends on: `VS-15`, `VS-09`
 - Outcome: Director evaluations run on the configured triggers and influence the next orchestration cycle.

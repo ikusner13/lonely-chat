@@ -7,6 +7,7 @@ import { BotRecord } from "../bots/bot-record";
 import { BotId } from "../platforms/Services/platform-adapter";
 import type { PlatformName } from "../platforms/Services/platform-adapter";
 import type { SessionMessageRecord } from "../sessions/session-message-record";
+import type { DirectorDirective } from "./director";
 
 const responderCap = 3;
 const consecutiveMessageLimit = 3;
@@ -34,7 +35,12 @@ const staggerDelayRange = {
   min: 500,
 } as const;
 
-export const SpeakerSelectionReason = Schema.Literals(["mention", "thread", "talkativeness"]);
+export const SpeakerSelectionReason = Schema.Literals([
+  "mention",
+  "director",
+  "thread",
+  "talkativeness",
+]);
 export type SpeakerSelectionReason = typeof SpeakerSelectionReason.Type;
 export const ResponseTrigger = Schema.Literals(["mention", "thread", "talkativeness", "silence"]);
 export type ResponseTrigger = typeof ResponseTrigger.Type;
@@ -53,6 +59,7 @@ export class SelectedSpeaker extends Schema.Class("SelectedSpeaker")({
 
 interface SpeakerSelectionOptions {
   readonly botStates?: readonly BotSpeakerState[];
+  readonly directorDirective?: DirectorDirective | null;
   readonly now?: number;
   readonly recentMessages?: readonly SessionMessageRecord[];
   readonly talkativenessRoll?: (bot: BotRecord) => number;
@@ -95,11 +102,14 @@ const selectionPriority = (reason: SpeakerSelectionReason): number => {
     case "mention": {
       return 0;
     }
-    case "thread": {
+    case "director": {
       return 1;
     }
-    case "talkativeness": {
+    case "thread": {
       return 2;
+    }
+    case "talkativeness": {
+      return 3;
     }
     default: {
       return responderCap;
@@ -109,6 +119,12 @@ const selectionPriority = (reason: SpeakerSelectionReason): number => {
 
 const interpolateDelay = (minimumDelayMs: number, maximumDelayMs: number, roll: number): number =>
   minimumDelayMs + Math.round((maximumDelayMs - minimumDelayMs) * Math.min(Math.max(roll, 0), 1));
+
+const matchesDirectorNudge = (bot: BotRecord, directive: DirectorDirective | null): boolean =>
+  directive?.nudgedBotName?.localeCompare(bot.name, undefined, {
+    sensitivity: "accent",
+    usage: "search",
+  }) === 0;
 
 export const isEligibleByState = (
   bot: BotRecord,
@@ -178,14 +194,44 @@ export const calculateResponseDelay = (
   return baseDelay + staggerDelay * selectionIndex;
 };
 
+export const responseTriggerForSelectionReason = (
+  reason: SpeakerSelectionReason,
+): ResponseTrigger => {
+  switch (reason) {
+    case "mention": {
+      return "mention";
+    }
+    case "thread": {
+      return "thread";
+    }
+    case "director": {
+      return "talkativeness";
+    }
+    case "talkativeness": {
+      return "talkativeness";
+    }
+    default: {
+      return "talkativeness";
+    }
+  }
+};
+
 export const selectSilenceBreaker = (
   bots: readonly BotRecord[],
-  options: Pick<SpeakerSelectionOptions, "botStates" | "now"> = {},
+  options: Pick<SpeakerSelectionOptions, "botStates" | "directorDirective" | "now"> = {},
 ): BotRecord | null => {
   const enabledBots = bots.filter((bot) => bot.enabled);
   const stateMap = makeStateMap(options.botStates ?? []);
   const now = options.now ?? Date.now();
   const eligibleBots = enabledBots.filter((bot) => isEligibleByState(bot, stateMap, now));
+  const nudgedBot = eligibleBots.find((bot) =>
+    matchesDirectorNudge(bot, options.directorDirective ?? null),
+  );
+
+  if (nudgedBot !== undefined) {
+    return nudgedBot;
+  }
+
   const [selectedBot] = eligibleBots.toSorted(
     (left, right) => right.talkativeness - left.talkativeness,
   );
@@ -200,6 +246,7 @@ export const selectSpeakers = (
 ): readonly SelectedSpeaker[] => {
   const enabledBots = bots.filter((bot) => bot.enabled);
   const stateMap = makeStateMap(options.botStates ?? []);
+  const directorDirective = options.directorDirective ?? null;
   const now = options.now ?? Date.now();
   const recentMessages = options.recentMessages ?? [];
   const talkativenessRoll = options.talkativenessRoll ?? (() => Math.random());
@@ -216,23 +263,61 @@ export const selectSpeakers = (
     .filter((speaker) => isEligibleByState(speaker.bot, stateMap, now));
 
   if (eligibleMentionedSpeakers.length > 0) {
-    return eligibleMentionedSpeakers.slice(0, responderCap);
+    const nudgedMentionedSpeaker = enabledBots.find(
+      (bot) =>
+        matchesDirectorNudge(bot, directorDirective) &&
+        !eligibleMentionedSpeakers.some((speaker) => speaker.bot.id === bot.id) &&
+        isEligibleByState(bot, stateMap, now),
+    );
+
+    if (nudgedMentionedSpeaker === undefined) {
+      return eligibleMentionedSpeakers.slice(0, responderCap);
+    }
+
+    return [
+      ...eligibleMentionedSpeakers,
+      new SelectedSpeaker({
+        bot: nudgedMentionedSpeaker,
+        reason: "director",
+      }),
+    ].slice(0, responderCap);
   }
 
   const nonMentionedBots = enabledBots.filter(
     (bot) => !mentionedBots.some((mentionedBot) => mentionedBot.id === bot.id),
   );
+  const directorBots = nonMentionedBots.filter(
+    (bot) => matchesDirectorNudge(bot, directorDirective) && isEligibleByState(bot, stateMap, now),
+  );
   const threadedBots = nonMentionedBots.filter(
     (bot) =>
-      hasBotSpokenRecently(bot, recentMessages) && threadRoll(bot) < threadContinuationThreshold,
+      !directorBots.some((directorBot) => directorBot.id === bot.id) &&
+      hasBotSpokenRecently(bot, recentMessages) &&
+      threadRoll(bot) < threadContinuationThreshold,
   );
   const talkativeBots = nonMentionedBots.filter(
     (bot) =>
+      !directorBots.some((directorBot) => directorBot.id === bot.id) &&
       !threadedBots.some((threadedBot) => threadedBot.id === bot.id) &&
-      talkativenessRoll(bot) < bot.talkativeness / 100,
+      talkativenessRoll(bot) <
+        Math.min(bot.talkativeness + (directorDirective?.talkativenessBoostPercent ?? 0), 100) /
+          100,
   );
 
   const mergedSpeakers: SelectedSpeaker[] = [];
+
+  for (const bot of directorBots) {
+    if (mergedSpeakers.some((speaker) => speaker.bot.id === bot.id)) {
+      continue;
+    }
+
+    mergedSpeakers.push(
+      new SelectedSpeaker({
+        bot,
+        reason: "director",
+      }),
+    );
+  }
 
   for (const bot of threadedBots) {
     if (mergedSpeakers.some((speaker) => speaker.bot.id === bot.id)) {
@@ -308,9 +393,11 @@ export const makeMentionResponseRequest = (
   bot: BotRecord,
   platform: PlatformName,
   recentMessages: readonly SessionMessageRecord[],
+  directorHint: string | null = null,
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
   messages: buildBotPromptMessages(bot, platform, {
+    finalSystemPrompt: directorHint,
     recentMessages,
   }),
   model: AiModelName.makeUnsafe(bot.model),
@@ -321,9 +408,11 @@ export const makeSilenceBreakerRequest = (
   bot: BotRecord,
   platform: PlatformName,
   recentMessages: readonly SessionMessageRecord[],
+  directorHint: string | null = null,
 ): AiGenerateRequest => ({
   botName: BotName.makeUnsafe(bot.displayName),
   messages: buildBotPromptMessages(bot, platform, {
+    finalSystemPrompt: directorHint,
     finalUserPrompt: "Start a new conversation topic naturally.",
     recentMessages,
   }),

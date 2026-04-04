@@ -11,6 +11,7 @@ import { TestClock } from "effect/testing";
 
 import { FakeAiClientLive, makeFakeAiClient } from "../ai/Layers/fake-ai-client";
 import { AiClient } from "../ai/Services/ai-client";
+import type { AiGenerateRequest } from "../ai/Services/ai-client";
 import { BotId as PersistedBotId, BotRecord } from "../bots/bot-record";
 import { BotServiceLive } from "../bots/Layers/bot-service";
 import { makeDatabaseLayer } from "../db/database";
@@ -315,6 +316,40 @@ const makeSessionTestLayer = (
   const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionDependencies));
 
   return Layer.mergeAll(aiLayer, botServiceLayer, scenarioServiceLayer, sessionServiceLayer);
+};
+
+const makeDirectorAwareAiClient = (directorResponseText: string) => {
+  const requests: AiGenerateRequest[] = [];
+
+  return {
+    aiLayer: Layer.succeed(
+      AiClient,
+      AiClient.of({
+        generateText: Effect.fn("AiClient.generateText")((request) =>
+          Effect.sync(() => {
+            requests.push(request);
+
+            if (request.botName === "Director") {
+              return {
+                costUsd: 0,
+                model: request.model,
+                text: directorResponseText,
+                tokensUsed: 9,
+              };
+            }
+
+            return {
+              costUsd: 0,
+              model: request.model,
+              text: `${request.botName}: directed reply`,
+              tokensUsed: 18,
+            };
+          }),
+        ),
+      }),
+    ),
+    getRequests: Effect.sync(() => [...requests]),
+  };
 };
 
 describe("session service", () => {
@@ -705,6 +740,96 @@ describe("session service", () => {
           total_tokens_used: 27,
         },
       ]);
+    }),
+  );
+
+  it.effect("runs the director on the message-count trigger and nudges the next response", () =>
+    Effect.gen(function* runsTheDirectorOnTheMessageCountTriggerAndNudgesTheNextResponse() {
+      const dbPath = yield* createDatabasePath;
+      const pixel = makeStoredBot({
+        talkativeness: 0,
+      });
+      const echo = makeStoredBot({
+        createdAt: "2026-04-03T00:00:01.000Z",
+        displayName: "Echo",
+        id: PersistedBotId.makeUnsafe("bot-2"),
+        name: "echo",
+        talkativeness: 0,
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      });
+
+      yield* insertStoredBot(dbPath, pixel);
+      yield* insertStoredBot(dbPath, echo);
+
+      const directorAwareAiClient = makeDirectorAwareAiClient(
+        JSON.stringify({
+          nudgeBot: "echo",
+          nudgeReason: "Echo can revive the topic naturally.",
+          suggestedTopic: "co-op games",
+          topicShift: true,
+          vibe: "stale",
+        }),
+      );
+      const mockPlatformAdapter = yield* makeMockPlatformAdapter;
+      const platformLayer = Layer.succeed(
+        PlatformAdapter,
+        PlatformAdapter.of(mockPlatformAdapter.platformAdapter),
+      );
+      const appLayer = makeSessionTestLayer(dbPath, platformLayer, directorAwareAiClient.aiLayer);
+
+      yield* Effect.gen(function* exerciseDirectorCountTrigger() {
+        const sessionService = yield* SessionService;
+
+        yield* sessionService.startSession();
+        yield* Effect.yieldNow;
+
+        for (let messageIndex = 0; messageIndex < 14; messageIndex += 1) {
+          yield* mockPlatformAdapter.emitIncomingMessage({
+            channel: mockBot.channel,
+            text: `setup line ${messageIndex + 1}`,
+            username: ChatUsername.makeUnsafe(`viewer-${messageIndex + 1}`),
+          });
+        }
+
+        expect(yield* waitForStoredSessionMessages(dbPath, 14)).toHaveLength(14);
+        expect(yield* directorAwareAiClient.getRequests).toHaveLength(0);
+
+        yield* mockPlatformAdapter.emitIncomingMessage({
+          channel: mockBot.channel,
+          text: "the room needs a new topic",
+          username: ChatUsername.makeUnsafe("viewer-15"),
+        });
+        expect(yield* waitForStoredSessionMessages(dbPath, 15)).toHaveLength(15);
+
+        yield* TestClock.adjust("6 seconds");
+
+        const storedMessages = yield* waitForStoredSessionMessages(dbPath, 16);
+
+        expect(storedMessages.length).toBeGreaterThanOrEqual(16);
+
+        const requests = yield* directorAwareAiClient.getRequests;
+        const directorRequest = requests.find((request) => request.botName === "Director");
+        const liveRequest = requests.find((request) => request.botName === "Echo");
+
+        expect(directorRequest?.botName).toBe("Director");
+        expect(liveRequest).toMatchObject({
+          botName: "Echo",
+        });
+        const directorHintMessage = liveRequest?.messages.find(
+          (message) => message.role === "system" && message.content.includes("co-op games"),
+        );
+        expect(directorHintMessage).toBeDefined();
+        expect(directorHintMessage?.content).toContain("co-op games");
+        expect(yield* mockPlatformAdapter.getSentMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              botId: makeBotConnection(echo).botId,
+              text: "Echo: directed reply",
+              username: ChatUsername.makeUnsafe("echo"),
+            }),
+          ]),
+        );
+      }).pipe(Effect.provide(appLayer));
     }),
   );
 

@@ -11,6 +11,7 @@ import {
   selectSilenceBreaker,
   selectSpeakers,
 } from "./mention-response";
+import { DirectorDirective } from "./director";
 
 const now = Date.UTC(2026, 3, 3, 0, 0, 0);
 
@@ -175,6 +176,40 @@ describe("speaker selection", () => {
     ]);
   });
 
+  it("gives the director-nudged bot a guaranteed slot in the next cycle", () => {
+    const pixel = makeBot({
+      talkativeness: 0,
+    });
+    const echo = makeBot({
+      displayName: "Echo",
+      id: BotId.makeUnsafe("bot-echo"),
+      name: "echo",
+      talkativeness: 0,
+    });
+    const nova = makeBot({
+      displayName: "Nova",
+      id: BotId.makeUnsafe("bot-nova"),
+      name: "nova",
+      talkativeness: 100,
+    });
+
+    expect(
+      selectSpeakers("chat keeps moving", [pixel, echo, nova], {
+        directorDirective: new DirectorDirective({
+          hint: "[CONTEXT: Current vibe: stale.]",
+          nudgedBotName: "echo",
+          talkativenessBoostPercent: 20,
+        }),
+        now,
+        talkativenessRoll: () => 0,
+      }).map((speaker) => [speaker.bot.id, speaker.reason]),
+    ).toEqual([
+      [echo.id, "director"],
+      [pixel.id, "talkativeness"],
+      [nova.id, "talkativeness"],
+    ]);
+  });
+
   it("calculates per-trigger delays within the expected ranges", () => {
     expect(
       calculateResponseDelay("mention", {
@@ -237,50 +272,78 @@ describe("speaker selection", () => {
     ).toBe(echo.id);
   });
 
+  it("lets the director nudge override the default silence-breaker choice", () => {
+    const pixel = makeBot({
+      talkativeness: 55,
+    });
+    const echo = makeBot({
+      displayName: "Echo",
+      id: BotId.makeUnsafe("bot-echo"),
+      name: "echo",
+      talkativeness: 85,
+    });
+
+    expect(
+      selectSilenceBreaker([pixel, echo], {
+        directorDirective: new DirectorDirective({
+          hint: "[CONTEXT: Why now: Echo can revive this topic.]",
+          nudgedBotName: "pixel",
+          talkativenessBoostPercent: 0,
+        }),
+        now,
+      })?.id,
+    ).toBe(pixel.id);
+  });
+
   it("assembles live mention prompts from the recent chat window and fallback settings", () => {
     const pixel = makeBot({
       exampleMessages: ["clip it", "keep it moving"],
       fallbackModels: ["openrouter/fallback-model"],
       postHistoryPrompt: "Stay dry and brief.",
     });
-    const request = makeMentionResponseRequest(pixel, "mock", [
-      new SessionMessageRecord({
-        botId: null,
-        content: "stale opener",
-        id: SessionMessageId.makeUnsafe("message-stale"),
-        isBot: false,
-        modelUsed: null,
-        platform: "mock",
-        sentAt: "2026-04-02T23:59:59.000Z",
-        sessionId: SessionId.makeUnsafe("session-1"),
-        tokensUsed: null,
-        username: ChatUsername.makeUnsafe("viewer-old"),
-      }),
-      new SessionMessageRecord({
-        botId: null,
-        content: "fresh setup",
-        id: SessionMessageId.makeUnsafe("message-fresh"),
-        isBot: false,
-        modelUsed: null,
-        platform: "mock",
-        sentAt: "2026-04-03T00:09:30.000Z",
-        sessionId: SessionId.makeUnsafe("session-1"),
-        tokensUsed: null,
-        username: ChatUsername.makeUnsafe("viewer-1"),
-      }),
-      new SessionMessageRecord({
-        botId: PlatformBotId.makeUnsafe("bot-echo"),
-        content: "bot follow-up",
-        id: SessionMessageId.makeUnsafe("message-bot"),
-        isBot: true,
-        modelUsed: "openrouter/mock-model",
-        platform: "mock",
-        sentAt: "2026-04-03T00:10:00.000Z",
-        sessionId: SessionId.makeUnsafe("session-1"),
-        tokensUsed: 14,
-        username: ChatUsername.makeUnsafe("echo"),
-      }),
-    ]);
+    const request = makeMentionResponseRequest(
+      pixel,
+      "mock",
+      [
+        new SessionMessageRecord({
+          botId: null,
+          content: "stale opener",
+          id: SessionMessageId.makeUnsafe("message-stale"),
+          isBot: false,
+          modelUsed: null,
+          platform: "mock",
+          sentAt: "2026-04-02T23:59:59.000Z",
+          sessionId: SessionId.makeUnsafe("session-1"),
+          tokensUsed: null,
+          username: ChatUsername.makeUnsafe("viewer-old"),
+        }),
+        new SessionMessageRecord({
+          botId: null,
+          content: "fresh setup",
+          id: SessionMessageId.makeUnsafe("message-fresh"),
+          isBot: false,
+          modelUsed: null,
+          platform: "mock",
+          sentAt: "2026-04-03T00:09:30.000Z",
+          sessionId: SessionId.makeUnsafe("session-1"),
+          tokensUsed: null,
+          username: ChatUsername.makeUnsafe("viewer-1"),
+        }),
+        new SessionMessageRecord({
+          botId: PlatformBotId.makeUnsafe("bot-echo"),
+          content: "bot follow-up",
+          id: SessionMessageId.makeUnsafe("message-bot"),
+          isBot: true,
+          modelUsed: "openrouter/mock-model",
+          platform: "mock",
+          sentAt: "2026-04-03T00:10:00.000Z",
+          sessionId: SessionId.makeUnsafe("session-1"),
+          tokensUsed: 14,
+          username: ChatUsername.makeUnsafe("echo"),
+        }),
+      ],
+      "[CONTEXT: Current vibe: stale. Consider steering the conversation toward: co-op games.]",
+    );
 
     expect(request.messages).toEqual([
       {
@@ -317,6 +380,11 @@ describe("speaker selection", () => {
       {
         content: "echo: bot follow-up",
         role: "user",
+      },
+      {
+        content:
+          "[CONTEXT: Current vibe: stale. Consider steering the conversation toward: co-op games.]",
+        role: "system",
       },
     ]);
     expect(request.settings).toMatchObject({
