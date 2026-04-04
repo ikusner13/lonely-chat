@@ -180,7 +180,7 @@ Use it with:
 - Spec inputs: `specs/platforms.md`, `specs/ui.md`, `specs/technical-effect.md`
 - Verify: token refresh/send tests, adapter boundary integration test, `vp check`, targeted `vp test`, manual smoke check
 
-### [ ] VS-20: Twitch live listener and session control
+### [x] VS-20: Twitch live listener and session control
 
 - Depends on: `VS-19`, `VS-05`
 - Outcome: A Twitch-backed session can start, receive chat, and show live messages in the UI.

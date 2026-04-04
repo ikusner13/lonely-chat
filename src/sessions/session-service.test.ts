@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -12,13 +13,16 @@ import { TestClock } from "effect/testing";
 import { FakeAiClientLive, makeFakeAiClient } from "../ai/Layers/fake-ai-client";
 import { AiClient } from "../ai/Services/ai-client";
 import type { AiGenerateRequest } from "../ai/Services/ai-client";
+import { BotTokenId, BotTokenRecord } from "../bots/bot-token-record";
 import { BotId as PersistedBotId, BotRecord } from "../bots/bot-record";
 import { BotServiceLive } from "../bots/Layers/bot-service";
+import { BotService } from "../bots/Services/bot-service";
 import { makeDatabaseLayer } from "../db/database";
 import {
   MockPlatformAdapterLive,
   makeMockPlatformAdapter,
 } from "../platforms/Layers/mock-platform-adapter";
+import { makePlatformAdapterLayer } from "../platforms/Layers/platform-adapter";
 import {
   BotId,
   ChannelName,
@@ -306,6 +310,89 @@ const insertStoredBot = (dbPath: string, bot: BotRecord): Effect.Effect<void, un
     }),
   );
 
+const insertChannelSetting = (dbPath: string, channel: string): Effect.Effect<void, unknown> =>
+  runWithDatabase(
+    dbPath,
+    Effect.gen(function* insertConfiguredChannelSetting() {
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`INSERT INTO settings (key, value, updated_at)
+        VALUES (${"channel"}, ${JSON.stringify(channel)}, ${"2026-04-03T00:00:00.000Z"})
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = excluded.updated_at`;
+    }),
+  );
+
+const makeStoredBotToken = (bot: BotRecord, overrides?: Partial<BotTokenRecord>): BotTokenRecord =>
+  new BotTokenRecord({
+    accessToken: "twitch-access-token",
+    botId: bot.id,
+    createdAt: "2026-04-03T00:00:00.000Z",
+    expiresAt: "2026-04-04T00:00:00.000Z",
+    id: BotTokenId.makeUnsafe(`token-${bot.id}`),
+    platform: "twitch",
+    refreshToken: "twitch-refresh-token",
+    scopes: ["chat:read", "chat:edit"],
+    updatedAt: "2026-04-03T00:00:00.000Z",
+    ...overrides,
+  });
+
+class FakeTwitchListenerHandle {
+  private readonly onUnbind: () => void;
+
+  constructor(onUnbind: () => void) {
+    this.onUnbind = onUnbind;
+  }
+
+  unbind(): void {
+    this.onUnbind();
+  }
+}
+
+class FakeTwitchSessionChatClient {
+  readonly joinedChannels: string[] = [];
+  readonly sentMessages: { readonly channel: string; readonly text: string }[] = [];
+  connectCalls = 0;
+  quitCalls = 0;
+
+  private readonly messageListeners = new Set<
+    (channel: string, username: string, text: string) => void
+  >();
+
+  connect(): void {
+    this.connectCalls += 1;
+  }
+
+  async join(channel: string): Promise<void> {
+    this.joinedChannels.push(channel);
+  }
+
+  onMessage(
+    listener: (channel: string, username: string, text: string) => void,
+  ): FakeTwitchListenerHandle {
+    this.messageListeners.add(listener);
+
+    return new FakeTwitchListenerHandle(() => {
+      this.messageListeners.delete(listener);
+    });
+  }
+
+  emitIncomingMessage(channel: string, username: string, text: string): void {
+    for (const listener of this.messageListeners) {
+      listener(channel, username, text);
+    }
+  }
+
+  quit(): void {
+    this.quitCalls += 1;
+  }
+
+  async say(channel: string, text: string): Promise<void> {
+    this.sentMessages.push({ channel, text });
+  }
+}
+
 const waitForStoredSessionMessages = (
   dbPath: string,
   expectedCount: number,
@@ -341,6 +428,50 @@ const makeSessionTestLayer = (
   const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionDependencies));
 
   return Layer.mergeAll(aiLayer, botServiceLayer, scenarioServiceLayer, sessionServiceLayer);
+};
+
+const makeTwitchSessionTestLayer = (
+  dbPath: string,
+  chatClient: FakeTwitchSessionChatClient,
+  aiLayer: Layer.Layer<AiClient> = FakeAiClientLive,
+) => {
+  const databaseLayer = makeDatabaseLayer(dbPath);
+  const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
+  const platformLayer = makePlatformAdapterLayer({
+    twitchConfig: {
+      clientId: "twitch-client-id",
+      clientSecret: Redacted.make("unused"),
+      redirectUri: "http://localhost:4173/auth/twitch/callback",
+      scopes: ["chat:read", "chat:edit"],
+    },
+    twitchDependencies: {
+      buildChatClient: () => chatClient,
+      now: () => "2026-04-03T00:00:00.000Z",
+      refreshAccessToken: async () => ({
+        accessToken: "refreshed-access-token",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+        refreshToken: "refreshed-refresh-token",
+        scopes: ["chat:read", "chat:edit"],
+      }),
+    },
+  }).pipe(Layer.provide(botServiceLayer));
+  const sessionDependencies = Layer.mergeAll(
+    aiLayer,
+    botServiceLayer,
+    databaseLayer,
+    platformLayer,
+    scenarioServiceLayer,
+  );
+  const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionDependencies));
+
+  return Layer.mergeAll(
+    aiLayer,
+    botServiceLayer,
+    platformLayer,
+    scenarioServiceLayer,
+    sessionServiceLayer,
+  );
 };
 
 const makeDirectorAwareAiClient = (directorResponseText: string) => {
@@ -459,6 +590,64 @@ describe("session service", () => {
           status: "ended",
         },
       ]);
+    }),
+  );
+
+  it.effect("starts a Twitch session and persists live chat from the configured channel", () =>
+    Effect.gen(function* startsATwitchSessionAndPersistsLiveChatFromTheConfiguredChannel() {
+      const dbPath = yield* createDatabasePath;
+      const twitchBot = makeStoredBot({
+        id: PersistedBotId.makeUnsafe("bot-twitch-1"),
+        name: "pixel_bot",
+        platform: "twitch",
+      });
+      const twitchChatClient = new FakeTwitchSessionChatClient();
+      const sessionLayer = makeTwitchSessionTestLayer(dbPath, twitchChatClient);
+
+      yield* insertStoredBot(dbPath, twitchBot);
+      yield* insertChannelSetting(dbPath, "#Lonely_Channel");
+
+      const persistedMessage = yield* Effect.gen(function* exerciseTwitchSessionLifecycle() {
+        const botService = yield* BotService;
+        const sessionService = yield* SessionService;
+
+        yield* botService.upsertBotToken(makeStoredBotToken(twitchBot));
+
+        const startedSession = yield* sessionService.startSession();
+
+        expect(startedSession.platform).toBe("twitch");
+        expect(startedSession.channel).toBe("lonely_channel");
+        expect(twitchChatClient.joinedChannels).toEqual(["lonely_channel"]);
+
+        const liveMessagesFiber = yield* sessionService.liveMessages.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* Effect.yieldNow;
+        twitchChatClient.emitIncomingMessage("#Lonely_Channel", "viewer-42", "hello from twitch");
+
+        const [liveMessage] = [...(yield* Fiber.join(liveMessagesFiber))];
+
+        expect(liveMessage?.platform).toBe("twitch");
+        expect(liveMessage?.content).toBe("hello from twitch");
+
+        const [storedMessage] = yield* waitForStoredSessionMessages(dbPath, 1);
+
+        yield* sessionService.stopSession();
+
+        return storedMessage;
+      }).pipe(Effect.provide(sessionLayer));
+
+      expect(persistedMessage?.bot_id).toBeNull();
+      expect(persistedMessage?.content).toBe("hello from twitch");
+      expect(persistedMessage?.is_bot).toBe(0);
+      expect(persistedMessage?.model_used).toBeNull();
+      expect(persistedMessage?.platform).toBe("twitch");
+      expect(typeof persistedMessage?.session_id).toBe("string");
+      expect(persistedMessage?.tokens_used).toBeNull();
+      expect(persistedMessage?.username).toBe("viewer-42");
     }),
   );
 

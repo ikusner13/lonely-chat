@@ -6,6 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -44,6 +45,7 @@ import {
   PlatformAdapter,
 } from "../../platforms/Services/platform-adapter";
 import type {
+  BotConnection,
   ChatMessage,
   PlatformConnectionError,
   PlatformSendError,
@@ -67,7 +69,7 @@ type SessionLimitMetric = "cost" | "time";
 type SessionStatus = "active" | "cost_limit" | "ended" | "timeout";
 
 const manualEndReason: SessionEndReason = "manual";
-const mockPlatform = "mock";
+const mockPlatform: SessionRecord["platform"] = "mock";
 const sessionEndedStatus: SessionStatus = "ended";
 const sessionStartedStatus: SessionStatus = "active";
 const sessionTimedOutStatus: SessionStatus = "timeout";
@@ -76,6 +78,9 @@ const liveBufferCapacity = 128;
 const silenceThresholdMs = 15_000;
 const sessionLimitCheckInterval = Duration.seconds(1);
 const alertThresholdPercents = [50, 75, 90] as const;
+const channelSettingKey = "channel";
+const twitchPlatform: SessionRecord["platform"] = "twitch";
+const decodeStoredChannelValue = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String));
 
 interface SessionRow {
   readonly channel: string;
@@ -83,13 +88,17 @@ interface SessionRow {
   readonly end_reason: SessionEndReason | null;
   readonly ended_at: string | null;
   readonly id: string;
-  readonly platform: typeof mockPlatform;
+  readonly platform: ChatMessage["platform"];
   readonly started_at: string;
   readonly status: SessionStatus;
   readonly time_limit_seconds: number | null;
   readonly total_cost_usd: number;
   readonly total_messages: number;
   readonly total_tokens_used: number;
+}
+
+interface SettingRow {
+  readonly value: string;
 }
 
 interface SessionMessageRow {
@@ -334,6 +343,7 @@ export const SessionServiceLive = Layer.effect(
       const sessionTimerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const silenceBreakerRef = yield* Ref.make<SessionTaskFiber | null>(null);
       const speakerStatesRef = yield* Ref.make<readonly BotSpeakerState[]>([]);
+      const connectedBotsRef = yield* Ref.make<readonly BotConnection[]>([]);
       const lastActivityAtRef = yield* Ref.make<number | null>(null);
       const pendingGeneratedMessagesRef = yield* Ref.make<readonly PendingGeneratedMessage[]>([]);
       const directorDirectiveRef = yield* Ref.make<DirectorDirective | null>(null);
@@ -363,6 +373,119 @@ export const SessionServiceLive = Layer.effect(
           yield* Ref.set(activeSessionRef, nextSession);
 
           return nextSession;
+        },
+      );
+
+      const getConfiguredChannel = Effect.fn("SessionService.getConfiguredChannel")(
+        function* getConfiguredChannelEffect() {
+          const rows = yield* sql<SettingRow>`SELECT value
+            FROM settings
+            WHERE key = ${channelSettingKey}
+            LIMIT 1`;
+          const storedValue = rows[0]?.value;
+
+          if (storedValue === undefined) {
+            const envChannel = process.env["TWITCH_CHANNEL_NAME"]?.trim();
+
+            return envChannel === undefined || envChannel.length === 0
+              ? defaultChannel
+              : ChannelName.makeUnsafe(envChannel.replace(/^#/u, "").toLowerCase());
+          }
+
+          try {
+            const parsedValue = decodeStoredChannelValue(storedValue).trim();
+
+            return parsedValue.length === 0
+              ? defaultChannel
+              : ChannelName.makeUnsafe(parsedValue.replace(/^#/u, "").toLowerCase());
+          } catch {
+            return defaultChannel;
+          }
+        },
+      );
+
+      const listSessionBots = Effect.fn("SessionService.listSessionBots")(
+        function* listSessionBotsEffect(platform: SessionRecord["platform"]) {
+          const bots = yield* botService.listBots();
+
+          return bots.filter(
+            (bot) => bot.enabled && (platform === mockPlatform || bot.platform === platform),
+          );
+        },
+      );
+
+      const getTwitchReadyBotConnections = Effect.fn("SessionService.getTwitchReadyBotConnections")(
+        function* getTwitchReadyBotConnectionsEffect(channel: SessionRecord["channel"]) {
+          const twitchBots = yield* listSessionBots(twitchPlatform);
+          const connections: BotConnection[] = [];
+
+          for (const bot of twitchBots) {
+            const token = yield* botService.getBotToken(bot.id);
+
+            if (token === null) {
+              continue;
+            }
+
+            connections.push({
+              botId: PlatformBotId.makeUnsafe(bot.id),
+              channel,
+              platform: twitchPlatform,
+              username: ChatUsername.makeUnsafe(bot.name),
+            });
+          }
+
+          return connections;
+        },
+      );
+
+      const connectSessionBot = Effect.fn("SessionService.connectSessionBot")(
+        function* connectSessionBotEffect(connection: BotConnection) {
+          const connectedBots = yield* Ref.get(connectedBotsRef);
+
+          if (
+            connectedBots.some(
+              (connectedBot) =>
+                connectedBot.botId === connection.botId &&
+                connectedBot.channel === connection.channel &&
+                connectedBot.platform === connection.platform,
+            )
+          ) {
+            return;
+          }
+
+          yield* platformAdapter.connect(connection);
+          yield* Ref.set(connectedBotsRef, [...connectedBots, connection]);
+        },
+      );
+
+      const disconnectConnectedBots = Effect.fn("SessionService.disconnectConnectedBots")(
+        function* disconnectConnectedBotsEffect() {
+          const connectedBots = yield* Ref.get(connectedBotsRef);
+
+          for (const connectedBot of connectedBots) {
+            yield* platformAdapter.disconnect(connectedBot);
+          }
+
+          yield* Ref.set(connectedBotsRef, []);
+        },
+      );
+
+      const resolveSessionBootstrap = Effect.fn("SessionService.resolveSessionBootstrap")(
+        function* resolveSessionBootstrapEffect() {
+          const channel = yield* getConfiguredChannel();
+          const twitchConnections = yield* getTwitchReadyBotConnections(channel);
+
+          return twitchConnections.length === 0
+            ? {
+                channel,
+                initialConnections: [] as readonly BotConnection[],
+                platform: mockPlatform,
+              }
+            : {
+                channel,
+                initialConnections: twitchConnections,
+                platform: twitchPlatform,
+              };
         },
       );
 
@@ -675,7 +798,7 @@ export const SessionServiceLive = Layer.effect(
 
       const evaluateDirector = Effect.fn("SessionService.evaluateDirector")(
         function* evaluateDirectorEffect(session: SessionRecord) {
-          const bots = yield* botService.listBots();
+          const bots = yield* listSessionBots(session.platform);
           const recentMessages = yield* getSessionMessages(session.id);
 
           if (bots.length === 0 || recentMessages.length === 0) {
@@ -770,9 +893,11 @@ export const SessionServiceLive = Layer.effect(
         yield* stopSilenceBreaker();
         yield* stopSessionTimer();
         yield* interruptTrackedFibers();
+        yield* disconnectConnectedBots();
         yield* generateBotMemories(endedSession).pipe(Effect.catch(() => Effect.void));
         yield* Ref.set(activeSessionRef, null);
         yield* Ref.set(activeAlertsRef, []);
+        yield* Ref.set(connectedBotsRef, []);
         yield* Ref.set(lastActivityAtRef, null);
         yield* Ref.set(pendingGeneratedMessagesRef, []);
         yield* Ref.set(speakerStatesRef, []);
@@ -844,7 +969,7 @@ export const SessionServiceLive = Layer.effect(
             username: ChatUsername.makeUnsafe(bot.name),
           } as const;
 
-          yield* platformAdapter.connect(speakerConnection);
+          yield* connectSessionBot(speakerConnection);
           yield* platformAdapter.sendMessage(speakerConnection, text);
           yield* Ref.set(
             speakerStatesRef,
@@ -953,7 +1078,7 @@ export const SessionServiceLive = Layer.effect(
                   username: ChatUsername.makeUnsafe(bot.name),
                 } as const;
                 const botMemories = yield* getBotMemories(bot.id);
-                yield* platformAdapter.connect(speakerConnection);
+                yield* connectSessionBot(speakerConnection);
                 const response = yield* aiClient.generateText(
                   makeScenarioResponseRequest(
                     bot,
@@ -1026,7 +1151,7 @@ export const SessionServiceLive = Layer.effect(
               username: ChatUsername.makeUnsafe(bot.name),
             } as const;
 
-            yield* platformAdapter.connect(speakerConnection);
+            yield* connectSessionBot(speakerConnection);
 
             const directorHint = yield* consumeDirectorHint();
             const response = yield* aiClient.generateText(yield* buildRequest(directorHint));
@@ -1052,10 +1177,11 @@ export const SessionServiceLive = Layer.effect(
             return;
           }
 
+          const sessionBots = yield* listSessionBots(session.platform);
           const speakerStates = yield* Ref.get(speakerStatesRef);
           yield* evaluateDirector(session);
           const directorDirective = yield* Ref.get(directorDirectiveRef);
-          const selectedSpeakers = selectSpeakers(message.text, yield* botService.listBots(), {
+          const selectedSpeakers = selectSpeakers(message.text, sessionBots, {
             botStates: speakerStates,
             directorDirective,
             now: yield* Clock.currentTimeMillis,
@@ -1124,11 +1250,14 @@ export const SessionServiceLive = Layer.effect(
 
               yield* evaluateDirector(session);
               const directorDirective = yield* Ref.get(directorDirectiveRef);
-              const silenceBreakerBot = selectSilenceBreaker(yield* botService.listBots(), {
-                botStates: yield* Ref.get(speakerStatesRef),
-                directorDirective,
-                now,
-              });
+              const silenceBreakerBot = selectSilenceBreaker(
+                yield* listSessionBots(session.platform),
+                {
+                  botStates: yield* Ref.get(speakerStatesRef),
+                  directorDirective,
+                  now,
+                },
+              );
 
               if (silenceBreakerBot === null) {
                 return;
@@ -1293,13 +1422,14 @@ export const SessionServiceLive = Layer.effect(
 
         const sessionOptions =
           options ?? new SessionStartOptions({ costLimitUsd: null, timeLimitSeconds: null });
+        const sessionBootstrap = yield* resolveSessionBootstrap();
         const session = new SessionRecord({
-          channel: defaultChannel,
+          channel: sessionBootstrap.channel,
           costLimitUsd: sessionOptions.costLimitUsd,
           endReason: null,
           endedAt: null,
           id: SessionId.makeUnsafe(crypto.randomUUID()),
-          platform: mockPlatform,
+          platform: sessionBootstrap.platform,
           startedAt: yield* getCurrentTimestamp(),
           status: sessionStartedStatus,
           timeLimitSeconds: sessionOptions.timeLimitSeconds,
@@ -1339,12 +1469,26 @@ export const SessionServiceLive = Layer.effect(
         yield* Ref.set(activeSessionRef, session);
         yield* Ref.set(activeAlertsRef, []);
         yield* Ref.set(speakerStatesRef, []);
+        yield* Ref.set(connectedBotsRef, []);
         yield* Ref.set(lastActivityAtRef, yield* Clock.currentTimeMillis);
         yield* Ref.set(pendingGeneratedMessagesRef, []);
         yield* Ref.set(directorDirectiveRef, null);
         yield* Ref.set(directorLastEvaluatedAtRef, null);
         yield* Ref.set(directorMessagesSinceLastEvaluationRef, 0);
         yield* Ref.set(activeScenarioTopicRef, null);
+
+        for (const connection of sessionBootstrap.initialConnections) {
+          yield* connectSessionBot(connection).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SessionStartError({
+                  cause,
+                  reason: "Could not connect the configured live Twitch bot.",
+                }),
+            ),
+          );
+        }
+
         yield* startMessageListener(session);
         yield* startSilenceBreaker(session);
         yield* startSessionTimer(session);

@@ -11,7 +11,7 @@ import { OpenRouterAiClientLive } from "../../ai/Layers/openrouter-ai-client";
 import { BotServiceLive } from "../../bots/Layers/bot-service";
 import type { BotService } from "../../bots/Services/bot-service";
 import { getDatabasePath, makeDatabaseLayer } from "../../db/database";
-import { MockPlatformAdapterLive } from "../../platforms/Layers/mock-platform-adapter";
+import { PlatformAdapterLive } from "../../platforms/Layers/platform-adapter";
 import { ScenarioServiceLive } from "../../scenarios/Layers/scenario-service";
 import type { ScenarioService } from "../../scenarios/Services/scenario-service";
 import { SessionServiceLive } from "../../sessions/Layers/session-service";
@@ -27,12 +27,13 @@ const makeAppRuntime = (
 ): ManagedRuntime.ManagedRuntime<AppServices, unknown> => {
   const databaseLayer = makeDatabaseLayer(dbPath);
   const botServiceLayer = BotServiceLive.pipe(Layer.provide(databaseLayer));
+  const platformAdapterLayer = PlatformAdapterLive.pipe(Layer.provide(botServiceLayer));
   const scenarioServiceLayer = ScenarioServiceLive.pipe(Layer.provide(databaseLayer));
   const sessionServiceDependencies = Layer.mergeAll(
     databaseLayer,
     aiLayer,
-    MockPlatformAdapterLive,
     botServiceLayer,
+    platformAdapterLayer,
     scenarioServiceLayer,
   );
   const sessionServiceLayer = SessionServiceLive.pipe(Layer.provide(sessionServiceDependencies));

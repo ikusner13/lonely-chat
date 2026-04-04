@@ -28,7 +28,7 @@
 </svelte:head>
 
 <h1 class="text-2xl font-bold text-zinc-100">Dashboard</h1>
-<p class="mt-1 text-sm text-zinc-400">Manage mock stream chat sessions.</p>
+<p class="mt-1 text-sm text-zinc-400">Manage stream chat sessions.</p>
 
 <section class="mt-6">
 	<svelte:boundary>
